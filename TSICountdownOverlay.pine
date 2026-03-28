@@ -1,0 +1,69 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+indicator("TSI Countdown Overlay", overlay=true, max_labels_count=1)
+
+// --- Inputs ---
+tsi_long   = input.int(6,   title="TSI Long Length",   minval=1)
+tsi_short  = input.int(13,  title="TSI Short Length",   minval=1)
+tsi_signal = input.int(4,   title="Signal Length",      minval=1)
+min_space  = input.float(3.0, title="Min TSI Space for Confirmation", minval=0.1, step=0.5)
+
+// --- TSI Calculation ---
+double_smooth(src, long, short) =>
+    ta.ema(ta.ema(src, long), short)
+
+pc                     = ta.change(close)
+double_smoothed_pc     = double_smooth(pc, tsi_long, tsi_short)
+double_smoothed_abs_pc = double_smooth(math.abs(pc), tsi_long, tsi_short)
+
+tsi_val = double_smoothed_abs_pc != 0 ? 100.0 * (double_smoothed_pc / double_smoothed_abs_pc) : 0.0
+sig_val = ta.ema(tsi_val, tsi_signal)
+
+// --- Core Logic ---
+diff         = tsi_val - sig_val
+seconds_left = math.max(0, int(math.ceil((time_close - timenow) / 1000)))
+
+// Evaluate at global scope to preserve series state (v6 short-circuit safety)
+raw_bull = ta.crossover(diff, min_space)
+raw_bear = ta.crossunder(diff, -min_space)
+
+// Only allow one signal per direction. After a bull signal fires,
+// no new bull until a bear signal fires (and vice versa).
+var int last_signal = 0   // 0 = none, 1 = bull, -1 = bear
+
+bull_cross = raw_bull and last_signal != 1
+bear_cross = raw_bear and last_signal != -1
+if bull_cross
+    last_signal := 1
+if bear_cross
+    last_signal := -1
+
+// --- Real-time Buy/Sell + Countdown Label ---
+var label signal_label = na
+label.delete(signal_label)
+
+if barstate.islast and bull_cross
+    signal_label := label.new(
+         bar_index, low,
+         "Buy\n" + str.tostring(seconds_left) + "s",
+         color     = color.green,
+         textcolor = color.white,
+         style     = label.style_label_up,
+         size      = size.large)
+else if barstate.islast and bear_cross
+    signal_label := label.new(
+         bar_index, high,
+         "Sell\n" + str.tostring(seconds_left) + "s",
+         color     = color.red,
+         textcolor = color.white,
+         style     = label.style_label_down,
+         size      = size.large)
+
+plotshape(bull_cross and not barstate.islast, title="Buy Signal",  style=shape.labelup,
+     location=location.belowbar, color=color.green, text="Buy",  textcolor=color.white, size=size.small)
+plotshape(bear_cross and not barstate.islast, title="Sell Signal", style=shape.labeldown,
+     location=location.abovebar, color=color.red,   text="Sell", textcolor=color.white, size=size.small)
+
+// --- Background flash on fresh confirmation cross ---
+bgcolor(bull_cross ? color.new(color.green, 90) : bear_cross ? color.new(color.red, 90) : na,
+        title="Confirmation Flash")

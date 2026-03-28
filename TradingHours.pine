@@ -1,0 +1,22 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+indicator("Trading Hours", overlay=true)
+
+// --- Inputs ---
+tz        = input.string("America/New_York", title="Timezone")
+startHour = input.int(8,  title="Start Hour",   minval=0, maxval=23)
+startMin  = input.int(30, title="Start Minute",  minval=0, maxval=59)
+endHour   = input.int(16, title="End Hour",      minval=0, maxval=23)
+endMin    = input.int(0,  title="End Minute",    minval=0, maxval=59)
+bgColor   = input.color(color.new(color.blue, 90), title="Background Color")
+
+// --- Session Check ---
+h = hour(time, tz)
+m = minute(time, tz)
+barMinutes   = h * 60 + m
+startMinutes = startHour * 60 + startMin
+endMinutes   = endHour * 60 + endMin
+
+inSession = barMinutes >= startMinutes and barMinutes < endMinutes
+
+bgcolor(inSession ? bgColor : na, title="Trading Hours")
