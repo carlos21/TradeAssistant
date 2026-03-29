@@ -15,6 +15,11 @@ namespace TradeAssistant.UI
     /// </summary>
     public class TradePlannerView : Border
     {
+        private Button _dirBtn;
+
+        private static readonly SolidColorBrush LongBrush  = new SolidColorBrush(Color.FromRgb(0x2E, 0x7D, 0x32));
+        private static readonly SolidColorBrush ShortBrush = new SolidColorBrush(Color.FromRgb(0xC6, 0x28, 0x28));
+
         public TradePlannerView(TradePlannerViewModel viewModel)
         {
             DataContext          = viewModel;
@@ -30,6 +35,13 @@ namespace TradeAssistant.UI
             IsHitTestVisible     = true;
 
             Child = BuildLayout();
+
+            // Keep direction button color in sync with direction changes
+            viewModel.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(TradePlannerViewModel.DirectionLabel) && _dirBtn != null)
+                    _dirBtn.Background = viewModel.DirectionLabel == "LONG" ? LongBrush : ShortBrush;
+            };
         }
 
         public void Detach()
@@ -56,20 +68,22 @@ namespace TradeAssistant.UI
                 Margin     = new Thickness(0, 0, 0, 10)
             });
 
-            // Direction toggle
-            var dirBtn = new Button
+            // Direction toggle — full-width, green for LONG / red for SHORT
+            var vm = DataContext as TradePlannerViewModel;
+            _dirBtn = new Button
             {
                 FontSize        = 14,
                 FontWeight      = FontWeights.Bold,
-                Height          = 32,
+                Height          = 36,
                 Cursor          = System.Windows.Input.Cursors.Hand,
                 Foreground      = Brushes.White,
                 BorderThickness = new Thickness(0),
-                Background      = new SolidColorBrush(Color.FromRgb(0x1B, 0x5E, 0x20))
+                Margin          = new Thickness(0, 0, 0, 8),
+                Background      = vm?.DirectionLabel == "SHORT" ? ShortBrush : LongBrush
             };
-            dirBtn.SetBinding(Button.ContentProperty, new Binding("DirectionLabel"));
-            dirBtn.SetBinding(Button.CommandProperty, new Binding("ToggleDirectionCommand"));
-            root.Children.Add(dirBtn);
+            _dirBtn.SetBinding(Button.ContentProperty, new Binding("DirectionLabel"));
+            _dirBtn.SetBinding(Button.CommandProperty, new Binding("ToggleDirectionCommand"));
+            root.Children.Add(_dirBtn);
             root.Children.Add(MakeSeparator());
 
             // Risk Mode dropdown
@@ -85,8 +99,7 @@ namespace TradeAssistant.UI
             root.Children.Add(MakeValueRow("Contracts", "Contracts",     null,      null, 20));
             root.Children.Add(MakeValueRow("Risk $",    "RiskDollars",   "${0:F0}", Color.FromRgb(0xEF, 0x53, 0x50)));
             root.Children.Add(MakeValueRow("Profit $",  "ProfitDollars", "${0:F0}", Color.FromRgb(0x66, 0xBB, 0x6A)));
-            root.Children.Add(MakeValueRow("SL Price",  "StopPrice",     "{0:F2}",  null));
-            root.Children.Add(MakeValueRow("TP Price",  "TpPrice",       "{0:F2}",  null));
+            root.Children.Add(MakeSeparator());
 
             // Armed indicator
             var armedBorder = new Border
@@ -122,8 +135,8 @@ namespace TradeAssistant.UI
             // Execute button
             var execBtn = new Button
             {
-                Content         = "EXECUTE (SPACE)",
-                Background      = new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35)),
+                Content         = "EXECUTE",
+                Background      = new SolidColorBrush(Color.FromRgb(0xE6, 0x51, 0x00)),
                 Foreground      = Brushes.White,
                 FontSize        = 13,
                 FontWeight      = FontWeights.Bold,

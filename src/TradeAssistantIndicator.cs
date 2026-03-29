@@ -388,9 +388,21 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void OnChartMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
         {
-            if (_dragMode == DragMode.None || _cachedScale == null) return;
-
             System.Windows.Point pos = e.GetPosition(ChartControl);
+
+            if (_dragMode == DragMode.None)
+            {
+                // Change cursor to resize arrow when hovering near a draggable border
+                if (_cachedScale != null && _stateMachine?.Current == TradeState.Planning)
+                {
+                    bool nearBorder = (_stopPrice > 0 && IsNearPrice(_stopPrice, pos.Y))
+                                   || (_tpPrice   > 0 && IsNearPrice(_tpPrice,   pos.Y));
+                    ChartControl.Cursor = nearBorder ? Cursors.SizeNS : null;
+                }
+                return;
+            }
+
+            if (_cachedScale == null) return;
             double mousePrice = _cachedScale.GetValueByY((float)pos.Y);
 
             if (_dragMode == DragMode.Sl)

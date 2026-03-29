@@ -64,7 +64,7 @@
 
         <!-- Execute button -->
         <Style x:Key="ExecuteButtonStyle" TargetType="Button">
-            <Setter Property="Background"   Value="#E53935"/>
+            <Setter Property="Background"   Value="#E65100"/>
             <Setter Property="Foreground"   Value="White"/>
             <Setter Property="FontSize"     Value="14"/>
             <Setter Property="FontWeight"   Value="Bold"/>
@@ -82,47 +82,22 @@
                    LetterSpacing="2" Margin="0,0,0,10"/>
 
         <!-- Direction toggle -->
-        <Grid Margin="0,0,0,10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition/>
-                <ColumnDefinition/>
-            </Grid.ColumnDefinitions>
-            <Button Grid.Column="0"
-                    Content="{Binding DirectionLabel}"
-                    Command="{Binding ToggleDirectionCommand}"
-                    Style="{StaticResource DirectionButtonStyle}">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource DirectionButtonStyle}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding DirectionLabel}" Value="LONG">
-                                <Setter Property="Background" Value="#1B5E20"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding DirectionLabel}" Value="SHORT">
-                                <Setter Property="Background" Value="#B71C1C"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-            </Button>
-            <TextBlock Grid.Column="1"
-                       Text="{Binding DirectionLabel}"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       FontSize="16" FontWeight="Bold">
-                <TextBlock.Style>
-                    <Style TargetType="TextBlock">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding DirectionLabel}" Value="LONG">
-                                <Setter Property="Foreground" Value="#66BB6A"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding DirectionLabel}" Value="SHORT">
-                                <Setter Property="Foreground" Value="#EF5350"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </TextBlock.Style>
-            </TextBlock>
-        </Grid>
+        <Button Content="{Binding DirectionLabel}"
+                Command="{Binding ToggleDirectionCommand}"
+                Margin="0,0,0,10">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource DirectionButtonStyle}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding DirectionLabel}" Value="LONG">
+                            <Setter Property="Background" Value="#2E7D32"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding DirectionLabel}" Value="SHORT">
+                            <Setter Property="Background" Value="#C62828"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
 
         <Separator Background="#333" Margin="0,0,0,10"/>
 
@@ -191,23 +166,7 @@
                        Text="{Binding ProfitDollars, StringFormat=${0:F0}}"/>
         </Grid>
 
-        <Grid Margin="0,0,0,4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
-                <ColumnDefinition/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="SL Price"   Style="{StaticResource LabelStyle}"/>
-            <TextBlock Grid.Column="1" Text="{Binding StopPrice, StringFormat={}{0:F2}}" Style="{StaticResource ValueStyle}"/>
-        </Grid>
-
-        <Grid Margin="0,0,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
-                <ColumnDefinition/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="TP Price"   Style="{StaticResource LabelStyle}"/>
-            <TextBlock Grid.Column="1" Text="{Binding TpPrice, StringFormat={}{0:F2}}" Style="{StaticResource ValueStyle}"/>
-        </Grid>
+        <Separator Background="#333" Margin="0,6,0,10"/>
 
         <!-- ARMED indicator -->
         <Border Background="#F57F17" CornerRadius="4" Padding="8,4" Margin="0,0,0,8"
@@ -224,7 +183,7 @@
                    Margin="0,0,0,10"/>
 
         <!-- Execute button -->
-        <Button Content="EXECUTE (SPACE)"
+        <Button Content="EXECUTE"
                 Command="{Binding ExecuteCommand}"
                 Style="{StaticResource ExecuteButtonStyle}"
                 Margin="0,0,0,4"/>
