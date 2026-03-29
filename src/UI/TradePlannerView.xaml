@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:TradeAssistant.UI"
+        xmlns:domain="clr-namespace:TradeAssistant.Domain"
         Title="Trade Assistant"
         Width="300"
         SizeToContent="Height"
@@ -15,6 +16,8 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <ObjectDataProvider x:Key="RiskModeValues" MethodName="GetValues"
+                            ObjectType="{x:Type domain:RiskMode}"/>
         <!-- Input field style -->
         <Style x:Key="InputStyle" TargetType="TextBox">
             <Setter Property="Background"   Value="#2D2D2D"/>
@@ -22,6 +25,15 @@
             <Setter Property="BorderBrush"  Value="#555"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding"      Value="4,2"/>
+            <Setter Property="Height"       Value="26"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- ComboBox style -->
+        <Style x:Key="ComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Background"   Value="#2D2D2D"/>
+            <Setter Property="Foreground"   Value="White"/>
+            <Setter Property="BorderBrush"  Value="#555"/>
             <Setter Property="Height"       Value="26"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
@@ -117,22 +129,14 @@
         <!-- Risk inputs -->
         <Grid Margin="0,0,0,6">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="80"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Risk %" Style="{StaticResource LabelStyle}"/>
+            <ComboBox Grid.Column="0" Style="{StaticResource ComboBoxStyle}"
+                      SelectedItem="{Binding RiskMode}"
+                      ItemsSource="{Binding Source={StaticResource RiskModeValues}}"/>
             <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
-                       Text="{Binding RiskPercent, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F1}}"/>
-        </Grid>
-
-        <Grid Margin="0,0,0,6">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
-                <ColumnDefinition/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Fixed Risk $" Style="{StaticResource LabelStyle}"/>
-            <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
-                       Text="{Binding FixedRiskDollars, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F0}}"/>
+                       Text="{Binding RiskValue, UpdateSourceTrigger=PropertyChanged}"/>
         </Grid>
 
         <Grid Margin="0,0,0,6">

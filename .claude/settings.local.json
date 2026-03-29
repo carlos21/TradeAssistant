@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:www.tradingview.com)"
+      "WebFetch(domain:www.tradingview.com)",
+      "Bash(dpkg -l)",
+      "Bash(apt list:*)",
+      "Bash(cmd.exe /c 'mklink /D \"C:\\\\Users\\\\dark_\\\\Documents\\\\NinjaTrader 8\\\\bin\\\\Custom\\\\AddOns\\\\TradeAssistant\" \"C:\\\\Users\\\\dark_\\\\Developer\\\\TradeAssistant\"')",
+      "Bash(ln:*)",
+      "Bash(SRC=\"/mnt/c/Users/dark_/Developer/TradeAssistant\")",
+      "Bash(DST=\"/mnt/c/Users/dark_/Documents/NinjaTrader 8/bin/Custom/AddOns/TradeAssistant\")",
+      "Bash(__NEW_LINE_248257252c4bbee6__ ln:*)",
+      "Bash(git mv:*)",
+      "Bash(cmd.exe /c 'mklink /J \"C:\\\\Users\\\\dark_\\\\Documents\\\\NinjaTrader 8\\\\bin\\\\Custom\\\\AddOns\\\\TradeAssistant\" \"C:\\\\Users\\\\dark_\\\\Developer\\\\TradeAssistant\\\\src\"')",
+      "Bash(powershell.exe -Command \"New-Item -ItemType Junction -Path 'C:\\\\Users\\\\dark_\\\\Documents\\\\NinjaTrader 8\\\\bin\\\\Custom\\\\AddOns\\\\TradeAssistant' -Target 'C:\\\\Users\\\\dark_\\\\Developer\\\\TradeAssistant\\\\src'\")",
+      "WebSearch",
+      "WebFetch(domain:ninjatrader.com)",
+      "WebFetch(domain:forum.ninjatrader.com)",
+      "Bash(find /mnt/c/Users/dark_/Developer/TradeAssistant -type f \\\\\\(-name *.md -o -name *.txt -o -name *.doc -o -name *.docx \\\\\\))"
     ]
   }
 }

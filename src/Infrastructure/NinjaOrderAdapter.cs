@@ -9,12 +9,13 @@ namespace TradeAssistant.Infrastructure
     /// <summary>
     /// Submits and manages unmanaged orders through the NinjaTrader Account API.
     ///
-    /// Unmanaged orders allow direct bracket control after the entry fill.
-    /// All order operations must be called from the NT UI thread or dispatched appropriately.
+    /// Indicators do not expose an Account property — the Account must be
+    /// provided externally (e.g. from ChartControl.OwnerChart.ChartTrader.Account).
     /// </summary>
     public sealed class NinjaOrderAdapter : IOrderAdapter, IDisposable
     {
         private readonly Indicator _indicator;
+        private readonly Account   _account;
 
         private Order _entryOrder;
         private Order _stopOrder;
@@ -26,10 +27,11 @@ namespace TradeAssistant.Infrastructure
         public event Action<string> OrderCancelled;
         public event Action         PositionClosed;
 
-        public NinjaOrderAdapter(Indicator indicator)
+        public NinjaOrderAdapter(Indicator indicator, Account account)
         {
             _indicator = indicator ?? throw new ArgumentNullException(nameof(indicator));
-            _indicator.Account.OrderUpdate += OnOrderUpdate;
+            _account   = account   ?? throw new ArgumentNullException(nameof(account));
+            _account.OrderUpdate += OnOrderUpdate;
         }
 
         public void SubmitEntry(TradePlan plan)
@@ -37,20 +39,14 @@ namespace TradeAssistant.Infrastructure
             _contracts        = plan.Contracts;
             _entryFilledFired = false;
 
-            OrderAction action = plan.EntryPrice > 0   // direction inferred from plan context
-                ? OrderAction.Buy                       // adjusted below
-                : OrderAction.Buy;
-
-            // Determine direction from stop vs entry relationship
-            // (plan does not carry direction directly to keep infra decoupled from domain enum)
             bool isLong = plan.StopPrice < plan.EntryPrice;
-            action = isLong ? OrderAction.Buy : OrderAction.SellShort;
+            OrderAction action = isLong ? OrderAction.Buy : OrderAction.SellShort;
 
-            _entryOrder = _indicator.Account.CreateOrder(
+            _entryOrder = _account.CreateOrder(
                 _indicator.Instrument,
                 action,
                 OrderType.Market,
-                OrderEntry.Automatic,
+                OrderEntry.Manual,
                 TimeInForce.Day,
                 _contracts,
                 0, 0,
@@ -59,19 +55,19 @@ namespace TradeAssistant.Infrastructure
                 DateTime.MaxValue,
                 null);
 
-            _indicator.Account.Submit(new[] { _entryOrder });
+            _account.Submit(new[] { _entryOrder });
         }
 
         public void SubmitBracket(double stopPrice, double tpPrice, int contracts)
         {
             bool isLong = _entryOrder != null && _entryOrder.OrderAction == OrderAction.Buy;
 
-            _stopOrder = _indicator.Account.CreateOrder(
+            _stopOrder = _account.CreateOrder(
                 _indicator.Instrument,
                 isLong ? OrderAction.Sell : OrderAction.BuyToCover,
                 OrderType.StopMarket,
-                OrderEntry.Automatic,
-                TimeInForce.GoodTillCancelled,
+                OrderEntry.Manual,
+                TimeInForce.Gtc,
                 contracts,
                 0, stopPrice,
                 null,
@@ -79,12 +75,12 @@ namespace TradeAssistant.Infrastructure
                 DateTime.MaxValue,
                 null);
 
-            _tpOrder = _indicator.Account.CreateOrder(
+            _tpOrder = _account.CreateOrder(
                 _indicator.Instrument,
                 isLong ? OrderAction.Sell : OrderAction.BuyToCover,
                 OrderType.Limit,
-                OrderEntry.Automatic,
-                TimeInForce.GoodTillCancelled,
+                OrderEntry.Manual,
+                TimeInForce.Gtc,
                 contracts,
                 tpPrice, 0,
                 null,
@@ -92,15 +88,14 @@ namespace TradeAssistant.Infrastructure
                 DateTime.MaxValue,
                 null);
 
-            _indicator.Account.Submit(new[] { _stopOrder, _tpOrder });
+            _account.Submit(new[] { _stopOrder, _tpOrder });
         }
 
         public void ModifyStop(double newStopPrice)
         {
             if (_stopOrder == null) return;
-
-            // Account.Change(orders, limitPrice, stopPrice, quantity)
-            _indicator.Account.Change(new[] { _stopOrder }, 0, newStopPrice, _contracts);
+            _stopOrder.StopPriceChanged = newStopPrice;
+            _account.Change(new[] { _stopOrder });
         }
 
         public void CancelAll()
@@ -116,7 +111,7 @@ namespace TradeAssistant.Infrastructure
                 order.OrderState == OrderState.Accepted ||
                 order.OrderState == OrderState.PartFilled)
             {
-                _indicator.Account.Cancel(new[] { order });
+                _account.Cancel(new[] { order });
             }
         }
 
@@ -124,19 +119,16 @@ namespace TradeAssistant.Infrastructure
         {
             Order order = e.Order;
 
-            // Entry order filled
             if (!_entryFilledFired &&
                 _entryOrder != null &&
                 order.Name  == "TA_Entry" &&
                 order.OrderState == OrderState.Filled)
             {
                 _entryFilledFired = true;
-                double fillPrice  = order.AverageFillPrice;
-                EntryFilled?.Invoke(fillPrice);
+                EntryFilled?.Invoke(order.AverageFillPrice);
                 return;
             }
 
-            // Cancellation / rejection of any of our orders
             if ((order.Name == "TA_Entry" || order.Name == "TA_Stop" || order.Name == "TA_TP") &&
                 (order.OrderState == OrderState.Cancelled || order.OrderState == OrderState.Rejected))
             {
@@ -144,7 +136,6 @@ namespace TradeAssistant.Infrastructure
                 return;
             }
 
-            // TP or stop hit → position closed
             if ((order.Name == "TA_Stop" || order.Name == "TA_TP") &&
                 order.OrderState == OrderState.Filled)
             {
@@ -154,9 +145,7 @@ namespace TradeAssistant.Infrastructure
 
         public void Dispose()
         {
-            if (_indicator?.Account != null)
-                _indicator.Account.OrderUpdate -= OnOrderUpdate;
-
+            _account.OrderUpdate -= OnOrderUpdate;
             CancelAll();
         }
     }

@@ -6,13 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A NinjaTrader 8 AddOn/Indicator for manual futures trade planning and execution. Targets NQ, MNQ, ES, MES. Provides TradingView-style interactive risk visualization with strict futures contract mechanics. Not an automated strategy.
 
+## Git Workflow
+
+Never ask to commit or push. The user manages git themselves.
+
 ## Build & Development
 
-This is a C# NinjaTrader 8 AddOn. NinjaTrader compiles AddOns internally via its IDE or the NinjaScript Editor. There is no standalone `.csproj` or `dotnet build` workflow — source files are placed in the NinjaTrader documents folder and compiled within the platform.
+This is a C# NinjaTrader 8 AddOn. NinjaTrader compiles AddOns internally via its IDE or the NinjaScript Editor. There is no standalone `.csproj` or `dotnet build` workflow.
 
-**NinjaTrader source path (typical):**
+**Repo structure:** All compilable source lives under `src/`. A symlink connects it to NinjaTrader:
 ```
-~/Documents/NinjaTrader 8/bin/Custom/AddOns/TradeAssistant/
+src/ → ~/Documents/NinjaTrader 8/bin/Custom/AddOns/TradeAssistant/
 ```
 
 **To compile:** Open NinjaTrader → NinjaScript Editor → right-click project → Compile. Compilation errors appear in the Output window.
@@ -33,7 +37,7 @@ Domain Layer  ←  fully NinjaTrader-free, unit-testable
 Infrastructure Layer  ←  wraps NinjaTrader API
 ```
 
-### Domain Layer (`/Domain`)
+### Domain Layer (`/src/Domain`)
 Pure C# logic with zero NinjaTrader references. All classes here must be unit-testable in isolation.
 - `RiskCalculator` — converts account risk % or fixed $ to a dollar risk amount
 - `FuturesPositionSizer` — applies the position sizing formula (see below)
@@ -49,21 +53,21 @@ RiskPerContract   = StopDistanceTicks × TickValue
 Contracts         = floor(RiskAmount / RiskPerContract)   // integer, >= 1
 ```
 
-### Application Layer (`/Application`)
+### Application Layer (`/src/Application`)
 Coordinates domain logic with UI and infrastructure. No direct NinjaTrader API calls.
 - `TradePlannerController` — reacts to UI changes, triggers recalculation
 - `ExecutionCoordinator` — orchestrates order submission sequence on spacebar press
 - `BreakEvenService` — listens to price events; moves stop to entry when RR target hit
 - `PriceMonitor` — wraps price event subscription (event-driven, never poll)
 
-### Infrastructure Layer (`/Infrastructure`)
+### Infrastructure Layer (`/src/Infrastructure`)
 Thin adapters over NinjaTrader API. Instrument tick values must always come from `Instrument.MasterInstrument.*` — never hardcoded.
 - `NinjaOrderAdapter` — submits unmanaged orders (entry, stop market, limit TP)
 - `AccountDataProvider` — reads account balance
 - `InstrumentInfoProvider` — exposes TickSize, TickValue, PointValue
 - `ChartRendererAdapter` — draws SL/TP rectangles and labels on chart
 
-### UI Layer (`/UI`)
+### UI Layer (`/src/UI`)
 WPF floating panel, strict MVVM. No trading logic in views or code-behind.
 - `TradePlannerViewModel` — all bindable properties; no NinjaTrader refs
 - `TradePlannerView` — XAML only

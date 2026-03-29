@@ -14,8 +14,8 @@ namespace TradeAssistant.Application
         private readonly IAccountDataProvider    _account;
 
         // Current mutable inputs
-        private double          _riskPercent      = 1.0;
-        private double          _fixedRiskDollars = 0;
+        private RiskMode        _riskMode         = RiskMode.Percentage;
+        private double          _riskValue        = 1.0;  // % or $ depending on mode
         private double          _rrRatio          = 2.0;
         private double          _breakEvenRr      = 1.0;
         private TradeDirection  _direction        = TradeDirection.Long;
@@ -34,17 +34,15 @@ namespace TradeAssistant.Application
 
         // ── Input setters — each triggers a recalculate ─────────────────────
 
-        public void SetRiskPercent(double value)
+        public void SetRiskMode(RiskMode mode)
         {
-            _riskPercent = value;
-            _fixedRiskDollars = 0;
+            _riskMode = mode;
             Recalculate();
         }
 
-        public void SetFixedRiskDollars(double value)
+        public void SetRiskValue(double value)
         {
-            _fixedRiskDollars = value;
-            _riskPercent = 0;
+            _riskValue = value;
             Recalculate();
         }
 
@@ -99,7 +97,7 @@ namespace TradeAssistant.Application
             double riskAmount;
             try
             {
-                riskAmount = RiskCalculator.Calculate(balance, _riskPercent, _fixedRiskDollars);
+                riskAmount = RiskCalculator.Calculate(balance, _riskMode, _riskValue);
             }
             catch (ArgumentException ex)
             {

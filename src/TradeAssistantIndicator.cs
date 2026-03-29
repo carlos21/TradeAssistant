@@ -1,6 +1,8 @@
 #region Using declarations
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.Windows.Input;
+using NinjaTrader.Cbi;
 using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript.Indicators;
 using SharpDX;
@@ -8,20 +10,11 @@ using TradeAssistant.Application;
 using TradeAssistant.Domain;
 using TradeAssistant.Infrastructure;
 using TradeAssistant.UI;
+using RiskMode = TradeAssistant.Domain.RiskMode;
 #endregion
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    /// <summary>
-    /// TradeAssistant — NinjaTrader 8 Indicator.
-    ///
-    /// Wires all four layers and owns the chart surface:
-    ///   - Floating WPF panel (TradePlannerView)
-    ///   - SharpDX rendering of SL/TP zones and labels (OnRender)
-    ///   - Mouse events for SL click-to-place and drag (via ChartControl events)
-    ///   - Keyboard spacebar / Esc (via ChartControl.PreviewKeyDown)
-    ///   - Price-tick forwarding to BreakEvenService
-    /// </summary>
     public class TradeAssistantIndicator : Indicator
     {
         // ── Layer objects ─────────────────────────────────────────────────────
@@ -40,12 +33,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double    _tpPrice     = 0;
         private double    _entryPrice  = 0;
         private TradePlan _currentPlan = TradePlan.Empty;
-        private ChartScale _cachedScale;   // cached in OnRender for mouse handlers
+        private ChartScale _cachedScale;
+        private bool       _initialized = false;
 
         private enum DragMode { None, Sl, Tp }
         private DragMode _dragMode = DragMode.None;
 
-        private const double HitTolerance = 6.0; // pixels
+        private const double HitTolerance = 8.0;
+        private const float  RectWidth    = 120f;   // width of SL/TP rectangles in pixels
 
         // ── SharpDX resources ─────────────────────────────────────────────────
         private SharpDX.Direct2D1.SolidColorBrush _slZoneBrush;
@@ -54,7 +49,11 @@ namespace NinjaTrader.NinjaScript.Indicators
         private SharpDX.Direct2D1.SolidColorBrush _tpLineBrush;
         private SharpDX.Direct2D1.SolidColorBrush _entryLineBrush;
         private SharpDX.Direct2D1.SolidColorBrush _labelBrush;
+        private SharpDX.Direct2D1.SolidColorBrush _slLabelBgBrush;
+        private SharpDX.Direct2D1.SolidColorBrush _tpLabelBgBrush;
+        private SharpDX.Direct2D1.SolidColorBrush _entryLabelBgBrush;
         private SharpDX.DirectWrite.TextFormat     _labelFormat;
+        private SharpDX.DirectWrite.TextFormat     _labelFormatSmall;
 
         // ─────────────────────────────────────────────────────────────────────
         // NT8 lifecycle
@@ -71,8 +70,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 DrawOnPricePanel = true;
                 DisplayInDataBox = false;
 
-                RiskPercent      = 1.0;
-                FixedRiskDollars = 0;
+                RiskMode         = RiskMode.Percentage;
+                RiskValue        = 1.0;
                 RrRatio          = 2.0;
                 BreakEvenRr      = 1.0;
             }
@@ -89,15 +88,15 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        // ── Parameters exposed in the NT8 indicator properties panel ─────────
+        // ── Parameters ──────────────────────────────────────────────────────
 
         [NinjaScriptProperty]
-        [Display(Name = "Risk %", Order = 1, GroupName = "Risk")]
-        public double RiskPercent { get; set; }
+        [Display(Name = "Risk Mode", Order = 1, GroupName = "Risk")]
+        public RiskMode RiskMode { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Fixed Risk $", Order = 2, GroupName = "Risk")]
-        public double FixedRiskDollars { get; set; }
+        [Display(Name = "Risk Value", Order = 2, GroupName = "Risk")]
+        public double RiskValue { get; set; }
 
         [NinjaScriptProperty]
         [Display(Name = "R:R Ratio", Order = 3, GroupName = "Risk")]
@@ -113,14 +112,16 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void InitializeLayers()
         {
+            Account account = ChartControl.OwnerChart.ChartTrader.Account;
+
             _stateMachine   = new TradeStateMachine();
             _instrumentInfo = new NinjaInstrumentInfoProvider(this);
-            _accountData    = new NinjaAccountDataProvider(this);
-            _orderAdapter   = new NinjaOrderAdapter(this);
+            _accountData    = new NinjaAccountDataProvider(account);
+            _orderAdapter   = new NinjaOrderAdapter(this, account);
 
             _controller = new TradePlannerController(_instrumentInfo, _accountData);
-            _controller.SetRiskPercent(RiskPercent);
-            _controller.SetFixedRiskDollars(FixedRiskDollars);
+            _controller.SetRiskMode(RiskMode);
+            _controller.SetRiskValue(RiskValue);
             _controller.SetRrRatio(RrRatio);
             _controller.SetBreakEvenRr(BreakEvenRr);
 
@@ -143,8 +144,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             Dispatcher.InvokeAsync(() =>
             {
                 _viewModel = new TradePlannerViewModel(_controller, _stateMachine);
-                _viewModel.RiskPercent      = RiskPercent;
-                _viewModel.FixedRiskDollars = FixedRiskDollars;
+                _viewModel.RiskMode         = RiskMode;
+                _viewModel.RiskValue        = RiskValue;
                 _viewModel.RrRatio          = RrRatio;
                 _viewModel.BreakEvenRr      = BreakEvenRr;
 
@@ -152,17 +153,71 @@ namespace NinjaTrader.NinjaScript.Indicators
                 _viewModel.ToggleDirectionAction = () =>
                 {
                     _controller.SetDirection(_viewModel.Direction);
+                    if (_entryPrice > 0)
+                    {
+                        if (_stopPrice > 0)
+                        {
+                            // Mirror the existing SL distance to the correct side
+                            double dist = Math.Abs(_entryPrice - _stopPrice);
+                            _stopPrice = _viewModel.Direction == TradeDirection.Long
+                                ? SnapToTick(_entryPrice - dist)
+                                : SnapToTick(_entryPrice + dist);
+                            _controller.SetStopPrice(_stopPrice);
+                        }
+                        else
+                        {
+                            PlaceDefaultStop();
+                        }
+                    }
                     ForceRefresh();
                 };
 
                 _panel = new TradePlannerView(_viewModel);
-                _panel.Closed += (_, __) => _panel = null;
-                _panel.Show();
+
+                if (ChartControl != null)
+                {
+                    var chartGrid = ChartControl.Parent as System.Windows.Controls.Grid;
+                    if (chartGrid != null)
+                    {
+                        System.Windows.Controls.Grid.SetRowSpan(_panel,
+                            chartGrid.RowDefinitions.Count > 0 ? chartGrid.RowDefinitions.Count : 1);
+                        System.Windows.Controls.Grid.SetColumnSpan(_panel,
+                            chartGrid.ColumnDefinitions.Count > 0 ? chartGrid.ColumnDefinitions.Count : 1);
+                        System.Windows.Controls.Panel.SetZIndex(_panel, 100);
+                        chartGrid.Children.Add(_panel);
+                    }
+                }
             });
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Price tick (called every tick by NT8)
+        // Auto-initialize SL/TP on first bar
+        // ─────────────────────────────────────────────────────────────────────
+
+        private void AutoInitialize()
+        {
+            if (_initialized || _entryPrice <= 0) return;
+            // Skip all historical bars except the last one so that the SL is placed
+            // relative to the most recent price, not a price deep in history.
+            if (State == State.Historical && CurrentBar < BarsArray[0].Count - 1) return;
+            _initialized = true;
+
+            PlaceDefaultStop();
+            _stateMachine.TryTransitionTo(TradeState.Planning);
+        }
+
+        private void PlaceDefaultStop()
+        {
+            TradeDirection dir = _viewModel?.Direction ?? TradeDirection.Long;
+            // 20 points on the correct side of entry for the current direction
+            _stopPrice = dir == TradeDirection.Long
+                ? SnapToTick(_entryPrice - 20.0)
+                : SnapToTick(_entryPrice + 20.0);
+            _controller.SetStopPrice(_stopPrice);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Price tick
         // ─────────────────────────────────────────────────────────────────────
 
         protected override void OnBarUpdate()
@@ -171,6 +226,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             _entryPrice = Close[0];
             _controller.SetEntryPrice(_entryPrice);
+
+            AutoInitialize();
 
             TradeDirection dir = _viewModel?.Direction ?? TradeDirection.Long;
             _breakEvenService.OnPriceUpdate(_entryPrice, dir);
@@ -187,88 +244,109 @@ namespace NinjaTrader.NinjaScript.Indicators
             DisposeBrushes();
             if (RenderTarget == null) return;
 
-            _slZoneBrush    = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.80f, 0.10f, 0.10f, 0.25f));
-            _tpZoneBrush    = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.70f, 0.20f, 0.25f));
-            _slLineBrush    = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.90f, 0.20f, 0.20f, 1.0f));
-            _tpLineBrush    = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.20f, 0.85f, 0.30f, 1.0f));
-            _entryLineBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.90f, 0.80f, 0.10f, 1.0f));
-            _labelBrush     = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, Color4.White);
-            _labelFormat    = new SharpDX.DirectWrite.TextFormat(
-                Core.Globals.DirectWriteFactory, "Segoe UI", 12.0f);
+            // Zone fills — 50 % opacity like TradingView
+            _slZoneBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.90f, 0.15f, 0.15f, 0.50f));
+            _tpZoneBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.75f, 0.25f, 0.50f));
+            // Lines
+            _slLineBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.95f, 0.20f, 0.20f, 1.0f));
+            _tpLineBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.20f, 0.90f, 0.35f, 1.0f));
+            _entryLineBrush   = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(1.0f, 0.85f, 0.10f, 1.0f));
+            // Label backgrounds
+            _slLabelBgBrush   = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.85f, 0.15f, 0.15f, 0.90f));
+            _tpLabelBgBrush   = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.65f, 0.20f, 0.90f));
+            _entryLabelBgBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.60f, 0.55f, 0.05f, 0.90f));
+            // Text
+            _labelBrush       = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, Color4.White);
+            _labelFormat      = new SharpDX.DirectWrite.TextFormat(
+                Core.Globals.DirectWriteFactory, "Segoe UI Semibold", 12.0f);
+            _labelFormatSmall = new SharpDX.DirectWrite.TextFormat(
+                Core.Globals.DirectWriteFactory, "Segoe UI", 10.0f);
         }
 
         protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
         {
             base.OnRender(chartControl, chartScale);
-
-            _cachedScale = chartScale;   // save for mouse handlers
+            _cachedScale = chartScale;
 
             if (RenderTarget == null || _stateMachine == null) return;
             if (_stateMachine.Current == TradeState.Idle) return;
-            if (_stopPrice <= 0 && _entryPrice <= 0) return;
+            if (_entryPrice <= 0) return;
 
-            float chartRight = (float)chartControl.ClientRectangle.Right;
-            float labelX     = chartRight - 145f;
+            // Anchor rectangles at the last bar (left edge aligned to current bar)
+            float lastBarX  = chartControl.GetXByBarIndex(ChartBars, CurrentBar);
+            float rectLeft  = lastBarX;
+            float rectRight = lastBarX + RectWidth;
 
             float entryY = (float)chartScale.GetYByValue(_entryPrice);
             float slY    = _stopPrice > 0 ? (float)chartScale.GetYByValue(_stopPrice) : 0;
             float tpY    = _tpPrice   > 0 ? (float)chartScale.GetYByValue(_tpPrice)   : 0;
 
-            // SL zone
+            // ── SL zone (RED filled rectangle between entry and stop) ──
             if (_stopPrice > 0 && _slZoneBrush != null)
             {
                 float top    = Math.Min(entryY, slY);
                 float bottom = Math.Max(entryY, slY);
-                RenderTarget.FillRectangle(new RectangleF(0, top, chartRight, bottom - top), _slZoneBrush);
-                RenderTarget.DrawLine(new Vector2(0, slY), new Vector2(chartRight, slY), _slLineBrush, 1.5f);
-                DrawLabel($"SL  {_stopPrice:F2}", labelX, slY - 16);
+                float height = Math.Max(bottom - top, 1f);
+
+                // Red filled zone (no border, no extending line — TradingView style)
+                RenderTarget.FillRectangle(new RectangleF(rectLeft, top, RectWidth, height), _slZoneBrush);
+
+                // SL label — show distance in points, not price
+                double slPts = Math.Abs(_entryPrice - _stopPrice);
+                string slText = $"SL  -{slPts:F2} pts";
+                float slLabelY = slY > entryY ? slY + 3 : slY - 20;
+                DrawLabelWithBg(slText, rectLeft + 4, slLabelY, _slLabelBgBrush, _labelFormat);
             }
 
-            // TP zone
+            // ── TP zone (GREEN filled rectangle between entry and TP) ──
             if (_tpPrice > 0 && _tpZoneBrush != null)
             {
                 float top    = Math.Min(entryY, tpY);
                 float bottom = Math.Max(entryY, tpY);
-                RenderTarget.FillRectangle(new RectangleF(0, top, chartRight, bottom - top), _tpZoneBrush);
-                RenderTarget.DrawLine(new Vector2(0, tpY), new Vector2(chartRight, tpY), _tpLineBrush, 1.5f);
+                float height = Math.Max(bottom - top, 1f);
 
-                if (_currentPlan.IsValid)
-                {
-                    DrawLabel($"TP  {_tpPrice:F2}", labelX, tpY - 16);
-                    double rrDisplay = _currentPlan.StopDistanceTicks > 0 && _tpPrice > 0 && _stopPrice > 0
-                        ? Math.Abs(_tpPrice - _entryPrice) / Math.Abs(_entryPrice - _stopPrice)
-                        : 0;
-                    DrawLabel($"RR {rrDisplay:F1}   {_currentPlan.Contracts}x", labelX, tpY + 4);
-                    DrawLabel($"Risk ${_currentPlan.RiskDollars:F0}  Profit ${_currentPlan.ProfitDollars:F0}", labelX, tpY + 22);
-                }
+                // Green filled zone (no border, no extending line — TradingView style)
+                RenderTarget.FillRectangle(new RectangleF(rectLeft, top, RectWidth, height), _tpZoneBrush);
+
+                // TP label — show distance in points, not price
+                double tpPts = Math.Abs(_tpPrice - _entryPrice);
+                string tpText = $"TP  +{tpPts:F2} pts";
+                float tpLabelY = tpY < entryY ? tpY - 20 : tpY + 3;
+                DrawLabelWithBg(tpText, rectLeft + 4, tpLabelY, _tpLabelBgBrush, _labelFormat);
             }
 
-            // Entry line
+            // ── Entry line (yellow, spans the rectangle width) ──
             if (_entryLineBrush != null)
-                RenderTarget.DrawLine(new Vector2(0, entryY), new Vector2(chartRight, entryY), _entryLineBrush, 1.0f);
-
-            DrawLabel($"Entry {_entryPrice:F2}", labelX, entryY - 16);
+            {
+                RenderTarget.DrawLine(
+                    new Vector2(rectLeft, entryY), new Vector2(rectRight, entryY), _entryLineBrush, 2.0f);
+            }
         }
 
-        private void DrawLabel(string text, float x, float y)
+        private void DrawLabelWithBg(string text, float x, float y,
+            SharpDX.Direct2D1.SolidColorBrush bgBrush, SharpDX.DirectWrite.TextFormat fmt)
         {
-            if (_labelFormat == null || _labelBrush == null || RenderTarget == null) return;
+            if (fmt == null || _labelBrush == null || RenderTarget == null) return;
             var layout = new SharpDX.DirectWrite.TextLayout(
-                Core.Globals.DirectWriteFactory, text, _labelFormat, 200, 20);
+                Core.Globals.DirectWriteFactory, text, fmt, 300, 20);
+            float w = layout.Metrics.Width;
+            float h = layout.Metrics.Height;
+            if (bgBrush != null)
+                RenderTarget.FillRectangle(new RectangleF(x - 2, y - 1, w + 6, h + 2), bgBrush);
             RenderTarget.DrawTextLayout(new Vector2(x, y), layout, _labelBrush);
             layout.Dispose();
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Mouse/keyboard — subscribed to ChartControl events (NT8 pattern)
+        // Mouse/keyboard
         // ─────────────────────────────────────────────────────────────────────
 
         private void SubscribeChartEvents()
         {
             if (ChartControl == null) return;
-            ChartControl.MouseDown     += OnChartMouseDown;
-            ChartControl.MouseMove     += OnChartMouseMove;
-            ChartControl.MouseUp       += OnChartMouseUp;
+            ChartControl.MouseDown      += OnChartMouseDown;
+            ChartControl.MouseMove      += OnChartMouseMove;
+            ChartControl.MouseUp        += OnChartMouseUp;
             ChartControl.PreviewKeyDown += OnChartKeyDown;
         }
 
@@ -287,31 +365,25 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (_cachedScale == null) return;
 
             System.Windows.Point pos = e.GetPosition(ChartControl);
-            double mousePrice = _cachedScale.GetValueByY((float)pos.Y);
 
-            // Hit-test existing lines to start drag
-            if (_stateMachine.Current == TradeState.Planning && _currentPlan.IsValid)
+            // Only start drag if near the SL or TP line
+            if (_stateMachine.Current == TradeState.Planning)
             {
                 if (_stopPrice > 0 && IsNearPrice(_stopPrice, pos.Y))
                 {
                     _dragMode = DragMode.Sl;
+                    Mouse.Capture(ChartControl);
                     e.Handled = true;
                     return;
                 }
                 if (_tpPrice > 0 && IsNearPrice(_tpPrice, pos.Y))
                 {
                     _dragMode = DragMode.Tp;
+                    Mouse.Capture(ChartControl);
                     e.Handled = true;
                     return;
                 }
             }
-
-            // Fresh click → place SL
-            PlaceStop(mousePrice);
-            if (_stateMachine.Current == TradeState.Idle)
-                _stateMachine.TryTransitionTo(TradeState.Planning);
-
-            e.Handled = true;
         }
 
         private void OnChartMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
@@ -325,13 +397,13 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 PlaceStop(mousePrice);
             }
-            else if (_dragMode == DragMode.Tp && _currentPlan.IsValid)
+            else if (_dragMode == DragMode.Tp)
             {
-                double newTp       = SnapToTick(mousePrice);
-                double stopDist    = Math.Abs(_entryPrice - _stopPrice);
-                double tpDist      = Math.Abs(newTp - _entryPrice);
-                double impliedRr   = stopDist > 0 ? Math.Round((tpDist / stopDist) * 4.0) / 4.0 : 2.0;
-                impliedRr          = Math.Max(0.25, impliedRr);
+                double newTp     = SnapToTick(mousePrice);
+                double stopDist  = Math.Abs(_entryPrice - _stopPrice);
+                double tpDist    = Math.Abs(newTp - _entryPrice);
+                double impliedRr = stopDist > 0 ? Math.Round((tpDist / stopDist) * 4.0) / 4.0 : 2.0;
+                impliedRr        = Math.Max(0.25, impliedRr);
 
                 _controller.SetRrRatio(impliedRr);
                 Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.RrRatio = impliedRr; });
@@ -341,11 +413,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void OnChartMouseUp(object sender, MouseButtonEventArgs e)
         {
-            _dragMode = DragMode.None;
+            if (_dragMode != DragMode.None)
+            {
+                Mouse.Capture(null);
+                _dragMode = DragMode.None;
+            }
         }
 
         private void OnChartKeyDown(object sender, KeyEventArgs e)
         {
+            // Don't steal keystrokes from our panel's input fields
+            if (Keyboard.FocusedElement is System.Windows.Controls.TextBox) return;
+
             if (e.Key == Key.Space)
             {
                 e.Handled = true;
@@ -373,7 +452,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Internal helpers
+        // Helpers
         // ─────────────────────────────────────────────────────────────────────
 
         private void PlaceStop(double price)
@@ -401,6 +480,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             _currentPlan = plan;
             if (plan.IsValid)
                 _tpPrice = plan.TpPrice;
+            else
+                _tpPrice = 0; // don't show stale TP when plan is invalid
+            ForceRefresh();
         }
 
         private void OnStateChanged(TradeState previous, TradeState next)
@@ -421,18 +503,23 @@ namespace NinjaTrader.NinjaScript.Indicators
             _stopPrice   = 0;
             _tpPrice     = 0;
             _currentPlan = TradePlan.Empty;
+            _initialized = false;
             ForceRefresh();
         }
 
         private void DisposeBrushes()
         {
-            _slZoneBrush?.Dispose();    _slZoneBrush    = null;
-            _tpZoneBrush?.Dispose();    _tpZoneBrush    = null;
-            _slLineBrush?.Dispose();    _slLineBrush    = null;
-            _tpLineBrush?.Dispose();    _tpLineBrush    = null;
-            _entryLineBrush?.Dispose(); _entryLineBrush = null;
-            _labelBrush?.Dispose();     _labelBrush     = null;
-            _labelFormat?.Dispose();    _labelFormat    = null;
+            _slZoneBrush?.Dispose();       _slZoneBrush       = null;
+            _tpZoneBrush?.Dispose();       _tpZoneBrush       = null;
+            _slLineBrush?.Dispose();       _slLineBrush       = null;
+            _tpLineBrush?.Dispose();       _tpLineBrush       = null;
+            _entryLineBrush?.Dispose();    _entryLineBrush    = null;
+            _slLabelBgBrush?.Dispose();    _slLabelBgBrush    = null;
+            _tpLabelBgBrush?.Dispose();    _tpLabelBgBrush    = null;
+            _entryLabelBgBrush?.Dispose(); _entryLabelBgBrush = null;
+            _labelBrush?.Dispose();        _labelBrush        = null;
+            _labelFormat?.Dispose();       _labelFormat       = null;
+            _labelFormatSmall?.Dispose();  _labelFormatSmall  = null;
         }
 
         private void Cleanup()
@@ -447,7 +534,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             Dispatcher.InvokeAsync(() =>
             {
-                _panel?.Close();
+                _panel?.Detach();
                 _viewModel?.Dispose();
             });
         }

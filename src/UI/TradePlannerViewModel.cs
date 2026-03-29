@@ -1,19 +1,21 @@
 using System;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using TradeAssistant.Application;
 using TradeAssistant.Domain;
 
 namespace TradeAssistant.UI
 {
     /// <summary>
-    /// ViewModel for the floating trade planner panel.
+    /// ViewModel for the trade planner panel embedded in the chart.
     /// All bindable properties live here; no NinjaTrader references.
     /// </summary>
     public sealed class TradePlannerViewModel : ViewModelBase
     {
         private readonly TradePlannerController _controller;
         private readonly TradeStateMachine      _stateMachine;
+        private readonly Dispatcher             _dispatcher;
 
         // Callbacks wired by the indicator for execution and direction toggle
         public Action ExecuteRequested      { get; set; }
@@ -21,27 +23,30 @@ namespace TradeAssistant.UI
 
         // ── Input properties ─────────────────────────────────────────────────
 
-        private double _riskPercent = 1.0;
-        public double RiskPercent
+        private RiskMode _riskMode = RiskMode.Percentage;
+        public RiskMode RiskMode
         {
-            get => _riskPercent;
+            get => _riskMode;
             set
             {
-                SetProperty(ref _riskPercent, value);
-                _controller.SetRiskPercent(value);
+                SetProperty(ref _riskMode, value);
+                OnPropertyChanged(nameof(RiskValueLabel));
+                _controller.SetRiskMode(value);
             }
         }
 
-        private double _fixedRiskDollars = 0;
-        public double FixedRiskDollars
+        private double _riskValue = 1.0;
+        public double RiskValue
         {
-            get => _fixedRiskDollars;
+            get => _riskValue;
             set
             {
-                SetProperty(ref _fixedRiskDollars, value);
-                _controller.SetFixedRiskDollars(value);
+                SetProperty(ref _riskValue, value);
+                _controller.SetRiskValue(value);
             }
         }
+
+        public string RiskValueLabel => _riskMode == RiskMode.Percentage ? "Risk %" : "Risk $";
 
         private double _rrRatio = 2.0;
         public double RrRatio
@@ -116,7 +121,7 @@ namespace TradeAssistant.UI
             private set => SetProperty(ref _tpPrice, value);
         }
 
-        private string _statusMessage = "Click chart to place SL";
+        private string _statusMessage = "Drag SL/TP to adjust";
         public string StatusMessage
         {
             get => _statusMessage;
@@ -155,6 +160,7 @@ namespace TradeAssistant.UI
         {
             _controller   = controller   ?? throw new ArgumentNullException(nameof(controller));
             _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
+            _dispatcher   = Dispatcher.CurrentDispatcher;
 
             _executeCommand = new RelayCommand(
                 () => ExecuteRequested?.Invoke(),
@@ -172,10 +178,17 @@ namespace TradeAssistant.UI
             _stateMachine.StateChanged += OnStateChanged;
         }
 
+        private void RunOnUI(Action action)
+        {
+            if (_dispatcher.CheckAccess())
+                action();
+            else
+                _dispatcher.BeginInvoke(action);
+        }
+
         private void OnPlanUpdated(TradePlan plan)
         {
-            // Must dispatch to UI thread since controller may be called from NT callbacks
-            Application.Current?.Dispatcher.Invoke(() =>
+            RunOnUI(() =>
             {
                 if (plan.IsValid)
                 {
@@ -200,7 +213,7 @@ namespace TradeAssistant.UI
 
         private void OnStateChanged(TradeState previous, TradeState next)
         {
-            Application.Current?.Dispatcher.Invoke(() =>
+            RunOnUI(() =>
             {
                 IsArmed = next == TradeState.Armed;
                 (_executeCommand as RelayCommand)?.RaiseCanExecuteChanged();
@@ -208,7 +221,7 @@ namespace TradeAssistant.UI
                 switch (next)
                 {
                     case TradeState.Idle:
-                        StatusMessage   = "Click chart to place SL";
+                        StatusMessage   = "Drag SL/TP to adjust";
                         Contracts       = 0;
                         RiskDollars     = 0;
                         ProfitDollars   = 0;
