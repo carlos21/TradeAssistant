@@ -70,10 +70,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 DrawOnPricePanel = true;
                 DisplayInDataBox = false;
 
-                RiskMode         = RiskMode.Percentage;
-                RiskValue        = 1.0;
+                RiskMode         = RiskMode.FixedAmount;
+                RiskValue        = 240.0;
                 RrRatio          = 2.0;
-                BreakEvenRr      = 1.0;
+                BreakEvenRr      = 0.0;
             }
             else if (State == State.DataLoaded)
             {
@@ -491,9 +491,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             _currentPlan = plan;
             if (plan.IsValid)
-                _tpPrice = plan.TpPrice;
-            else
-                _tpPrice = 0; // don't show stale TP when plan is invalid
+            {
+                _stopPrice = plan.StopPrice;  // Sync SL from plan (maintains fixed tick distance)
+            }
+            // Always show TP box if we have a TP price, even for invalid plans
+            // (e.g., insufficient risk budget but TP should still be visible)
+            _tpPrice = plan.TpPrice;
             ForceRefresh();
         }
 

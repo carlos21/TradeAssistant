@@ -14,13 +14,17 @@ namespace TradeAssistant.Application
         private readonly IAccountDataProvider    _account;
 
         // Current mutable inputs
-        private RiskMode        _riskMode         = RiskMode.Percentage;
-        private double          _riskValue        = 1.0;  // % or $ depending on mode
+        private RiskMode        _riskMode         = RiskMode.FixedAmount;
+        private double          _riskValue        = 240.0;  // % or $ depending on mode
         private double          _rrRatio          = 2.0;
-        private double          _breakEvenRr      = 1.0;
+        private double          _breakEvenRr      = 0.0;   // 0 = disabled (optional)
         private TradeDirection  _direction        = TradeDirection.Long;
         private double          _entryPrice       = 0;
         private double          _stopPrice        = 0;
+
+        // Fixed SL distance in ticks - set when user manually places SL, kept constant
+        private double          _fixedSlDistanceTicks = 0;
+        private bool            _slManuallySet = false;
 
         public event Action<TradePlan> PlanUpdated;
 
@@ -50,7 +54,19 @@ namespace TradeAssistant.Application
         public void SetBreakEvenRr(double value)  { _breakEvenRr = value; Recalculate(); }
         public void SetDirection(TradeDirection d) { _direction   = d;     Recalculate(); }
         public void SetEntryPrice(double price)   { _entryPrice  = price; Recalculate(); }
-        public void SetStopPrice(double price)    { _stopPrice   = price; Recalculate(); }
+        public void SetStopPrice(double price)
+        {
+            _stopPrice = price;
+            _slManuallySet = true;
+            // Capture the SL distance in ticks when user sets it
+            if (_entryPrice > 0 && _instrument != null)
+            {
+                double tickSize = _instrument.TickSize;
+                if (tickSize > 0)
+                    _fixedSlDistanceTicks = Math.Abs(_entryPrice - _stopPrice) / tickSize;
+            }
+            Recalculate();
+        }
 
         // ── Core recalculation ───────────────────────────────────────────────
 
@@ -87,11 +103,20 @@ namespace TradeAssistant.Application
                 ? (IDirectionStrategy)LongStrategy.Instance
                 : ShortStrategy.Instance;
 
+            // SL price stays at the level where user dragged it - does not float with price
+            // The _stopPrice is only changed when user manually drags it via SetStopPrice()
+
             if (!strategy.IsStopValid(_entryPrice, _stopPrice))
                 return TradePlan.Invalid(
                     _direction == TradeDirection.Long
                         ? "Stop must be below entry for Long trades."
                         : "Stop must be above entry for Short trades.");
+
+            // Compute TP and break-even prices (always calculate for visualization)
+            double tpPrice = strategy.CalcTp(_entryPrice, _stopPrice, _rrRatio);
+            double bePrice = _breakEvenRr > 0
+                ? strategy.CalcBreakEven(_entryPrice, _stopPrice, _breakEvenRr)
+                : 0;  // 0 = disabled
 
             // Calculate risk amount
             double riskAmount;
@@ -101,7 +126,7 @@ namespace TradeAssistant.Application
             }
             catch (ArgumentException ex)
             {
-                return TradePlan.Invalid(ex.Message);
+                return TradePlan.Invalid(ex.Message, tpPrice, bePrice);
             }
 
             // Position sizing
@@ -109,15 +134,13 @@ namespace TradeAssistant.Application
                 FuturesPositionSizer.Calculate(_entryPrice, _stopPrice, tickSize, tickValue, riskAmount);
 
             if (error != null)
-                return TradePlan.Invalid(error);
+                return TradePlan.Invalid(error, tpPrice, bePrice);
 
             if (contracts < 1)
                 return TradePlan.Invalid(
-                    $"Insufficient risk budget. Need ${riskPerContract:F0}/contract, budget ${riskAmount:F0}.");
+                    $"Insufficient risk budget. Need ${riskPerContract:F0}/contract, budget ${riskAmount:F0}.",
+                    tpPrice, bePrice);
 
-            // Compute TP and break-even prices
-            double tpPrice      = strategy.CalcTp(_entryPrice, _stopPrice, _rrRatio);
-            double bePrice      = strategy.CalcBreakEven(_entryPrice, _stopPrice, _breakEvenRr);
             double profitDollars = contracts * stopTicks * _rrRatio * tickValue;
             double actualRisk    = contracts * riskPerContract;
 

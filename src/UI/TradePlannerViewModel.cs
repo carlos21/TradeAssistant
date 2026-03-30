@@ -23,7 +23,7 @@ namespace TradeAssistant.UI
 
         // ── Input properties ─────────────────────────────────────────────────
 
-        private RiskMode _riskMode = RiskMode.Percentage;
+        private RiskMode _riskMode = RiskMode.FixedAmount;
         public RiskMode RiskMode
         {
             get => _riskMode;
@@ -35,7 +35,7 @@ namespace TradeAssistant.UI
             }
         }
 
-        private double _riskValue = 1.0;
+        private double _riskValue = 240.0;
         public double RiskValue
         {
             get => _riskValue;
@@ -59,7 +59,7 @@ namespace TradeAssistant.UI
             }
         }
 
-        private double _breakEvenRr = 1.0;
+        private double _breakEvenRr = 0.0;
         public double BreakEvenRr
         {
             get => _breakEvenRr;

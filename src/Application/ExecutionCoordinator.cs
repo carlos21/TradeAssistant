@@ -85,7 +85,9 @@ namespace TradeAssistant.Application
                 StatusMessage?.Invoke(
                     $"Filled at {fillPrice:F2}. Stop: {_pendingPlan.StopPrice:F2}, TP: {_pendingPlan.TpPrice:F2}");
 
-                _breakEvenService.Start(_pendingPlan.BreakEvenPrice, fillPrice);
+                // Only activate break-even if BE at R:R is set (> 0)
+                if (_pendingPlan.BreakEvenPrice > 0)
+                    _breakEvenService.Start(_pendingPlan.BreakEvenPrice, fillPrice);
             }
             catch (Exception ex)
             {

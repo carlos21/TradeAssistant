@@ -57,6 +57,9 @@ namespace TradeAssistant.Domain
         public static TradePlan Invalid(string error) =>
             new TradePlan(0, 0, 0, 0, 0, 0, 0, 0, false, error);
 
+        public static TradePlan Invalid(string error, double tpPrice, double breakEvenPrice) =>
+            new TradePlan(0, 0, 0, 0, 0, tpPrice, breakEvenPrice, 0, false, error);
+
         public static TradePlan Empty =>
             new TradePlan(0, 0, 0, 0, 0, 0, 0, 0, false, "No plan calculated.");
     }
