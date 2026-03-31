@@ -81,6 +81,21 @@
                    FontSize="11" FontWeight="Bold" Foreground="#888"
                    LetterSpacing="2" Margin="0,0,0,10"/>
 
+        <!-- Account selector -->
+        <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="60"/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Account" Style="{StaticResource LabelStyle}"/>
+            <ComboBox Grid.Column="1" Style="{StaticResource ComboBoxStyle}"
+                      SelectedItem="{Binding SelectedAccount}"
+                      ItemsSource="{Binding AvailableAccounts}"
+                      IsEnabled="{Binding CanChangeAccount}"/>
+        </Grid>
+
+        <Separator Background="#333" Margin="0,0,0,10"/>
+
         <!-- Direction toggle -->
         <Button Content="{Binding DirectionLabel}"
                 Command="{Binding ToggleDirectionCommand}"

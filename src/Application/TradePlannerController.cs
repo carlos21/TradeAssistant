@@ -103,8 +103,16 @@ namespace TradeAssistant.Application
                 ? (IDirectionStrategy)LongStrategy.Instance
                 : ShortStrategy.Instance;
 
-            // SL price stays at the level where user dragged it - does not float with price
-            // The _stopPrice is only changed when user manually drags it via SetStopPrice()
+            // Maintain constant SL distance: recalculate stop price based on current entry
+            // to make SL float with price. _fixedSlDistanceTicks is only updated when
+            // user manually drags the SL via SetStopPrice().
+            if (_slManuallySet && _fixedSlDistanceTicks > 0 && _entryPrice > 0 && tickSize > 0)
+            {
+                double fixedDistance = _fixedSlDistanceTicks * tickSize;
+                _stopPrice = _direction == TradeDirection.Long
+                    ? _entryPrice - fixedDistance
+                    : _entryPrice + fixedDistance;
+            }
 
             if (!strategy.IsStopValid(_entryPrice, _stopPrice))
                 return TradePlan.Invalid(

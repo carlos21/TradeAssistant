@@ -53,6 +53,23 @@ See [references/design-patterns.md](references/design-patterns.md) for NT8-speci
 - Adapter (Infrastructure wrappers)
 - Factory (order creation)
 
+## UI Consistency Rule
+
+The TradeAssistant has **two UI surfaces** that must remain consistent:
+
+| UI Surface | File | Implementation |
+|------------|------|----------------|
+| **Panel on chart** | `TradePlannerView.xaml.cs` | Code-built in `BuildLayout()` method |
+| **Popup window** | `TradePlannerView.xaml` | XAML markup (rarely used) |
+
+**When modifying the UI:**
+- Always update BOTH files to keep them in sync
+- Use the same control order, labels, and bindings
+- Prefer referencing `BuildLayout()` method name for chart panel changes
+- Test changes on the chart panel (primary UI)
+
+Example: *"Add Account dropdown to `BuildLayout()` in `TradePlannerView.xaml.cs` (and XAML if applicable)"
+
 ## Key API Reminders
 
 - **Instrument values**: Always read from `Instrument.MasterInstrument.TickSize`, `.TickValue`, `.PointValue`. Never hardcode tick sizes.

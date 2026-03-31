@@ -68,6 +68,10 @@ namespace TradeAssistant.UI
                 Margin     = new Thickness(0, 0, 0, 10)
             });
 
+            // Account selector dropdown
+            root.Children.Add(MakeAccountSelectorRow());
+            root.Children.Add(MakeSeparator());
+
             // Direction toggle — full-width, green for LONG / red for SHORT
             var vm = DataContext as TradePlannerViewModel;
             _dirBtn = new Button
@@ -100,6 +104,9 @@ namespace TradeAssistant.UI
             root.Children.Add(MakeValueRow("Risk $",    "RiskDollars",   "${0:F0}", Color.FromRgb(0xEF, 0x53, 0x50)));
             root.Children.Add(MakeValueRow("Profit $",  "ProfitDollars", "${0:F0}", Color.FromRgb(0x66, 0xBB, 0x6A)));
             root.Children.Add(MakeSeparator());
+
+            // Test Mode checkbox
+            root.Children.Add(MakeTestModeRow());
 
             // Armed indicator
             var armedBorder = new Border
@@ -189,6 +196,76 @@ namespace TradeAssistant.UI
             tb.PreviewKeyDown += NumericTextBoxPreviewKeyDown;
             Grid.SetColumn(tb, 1);
             grid.Children.Add(tb);
+
+            return grid;
+        }
+
+        private UIElement MakeAccountSelectorRow()
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+
+            var lbl = new TextBlock
+            {
+                Text = "Account",
+                Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 12
+            };
+            Grid.SetColumn(lbl, 0);
+            grid.Children.Add(lbl);
+
+            var combo = new ComboBox
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4, 2, 4, 2),
+                Height = 24,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                FontSize = 12
+            };
+
+            // Bind to AvailableAccounts for items and SelectedAccount for selection
+            combo.SetBinding(ComboBox.ItemsSourceProperty, new Binding("AvailableAccounts"));
+            combo.SetBinding(ComboBox.SelectedItemProperty, 
+                new Binding("SelectedAccount") { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
+            combo.SetBinding(ComboBox.IsEnabledProperty, new Binding("CanChangeAccount"));
+
+            Grid.SetColumn(combo, 1);
+            grid.Children.Add(combo);
+
+            return grid;
+        }
+
+        private static UIElement MakeTestModeRow()
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+
+            var lbl = new TextBlock
+            {
+                Text = "Test Mode",
+                Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 12
+            };
+            Grid.SetColumn(lbl, 0);
+            grid.Children.Add(lbl);
+
+            var chk = new CheckBox
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = Brushes.White
+            };
+            chk.SetBinding(CheckBox.IsCheckedProperty, 
+                new Binding("TestMode") { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
+
+            Grid.SetColumn(chk, 1);
+            grid.Children.Add(chk);
 
             return grid;
         }

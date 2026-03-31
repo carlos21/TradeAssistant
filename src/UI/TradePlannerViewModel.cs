@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -20,6 +21,34 @@ namespace TradeAssistant.UI
         // Callbacks wired by the indicator for execution and direction toggle
         public Action ExecuteRequested      { get; set; }
         public Action ToggleDirectionAction { get; set; }
+        public Action<string> AccountChangedAction { get; set; }
+
+        // ── Account properties ───────────────────────────────────────────────
+
+        private List<string> _availableAccounts = new List<string>();
+        public List<string> AvailableAccounts
+        {
+            get => _availableAccounts;
+            set => SetProperty(ref _availableAccounts, value);
+        }
+
+        private string _selectedAccount;
+        public string SelectedAccount
+        {
+            get => _selectedAccount;
+            set
+            {
+                if (_selectedAccount != value)
+                {
+                    _selectedAccount = value;
+                    OnPropertyChanged();
+                    AccountChangedAction?.Invoke(value);
+                }
+            }
+        }
+
+        public bool CanChangeAccount => _stateMachine?.Current == TradeState.Idle || 
+                                        _stateMachine?.Current == TradeState.Planning;
 
         // ── Input properties ─────────────────────────────────────────────────
 
@@ -69,6 +98,19 @@ namespace TradeAssistant.UI
                 _controller.SetBreakEvenRr(value);
             }
         }
+
+        private bool _testMode = false;
+        public bool TestMode
+        {
+            get => _testMode;
+            set
+            {
+                SetProperty(ref _testMode, value);
+                TestModeChangedAction?.Invoke(value);
+            }
+        }
+
+        public Action<bool> TestModeChangedAction { get; set; }
 
         private TradeDirection _direction = TradeDirection.Long;
         public TradeDirection Direction
@@ -217,6 +259,7 @@ namespace TradeAssistant.UI
             {
                 IsArmed = next == TradeState.Armed;
                 (_executeCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(CanChangeAccount));
 
                 switch (next)
                 {
