@@ -7,10 +7,8 @@ using TradeAssistant.Domain;
 namespace TradeAssistant.Infrastructure
 {
     /// <summary>
-    /// Submits and manages unmanaged orders through the NinjaTrader Account API.
-    ///
-    /// Indicators do not expose an Account property — the Account must be
-    /// provided externally (e.g. from ChartControl.OwnerChart.ChartTrader.Account).
+    /// Submits orders through the NinjaTrader Account API.
+    /// Supports both unmanaged orders and ATM strategy attachment.
     /// </summary>
     public sealed class NinjaOrderAdapter : IOrderAdapter, IDisposable
     {
@@ -18,10 +16,9 @@ namespace TradeAssistant.Infrastructure
         private readonly Account   _account;
 
         private Order _entryOrder;
-        private Order _stopOrder;
-        private Order _tpOrder;
         private int   _contracts;
         private bool  _entryFilledFired;
+        private string _currentAtmStrategy;
 
         public event Action<double> EntryFilled;
         public event Action<string> OrderCancelled;
@@ -34,10 +31,65 @@ namespace TradeAssistant.Infrastructure
             _account.OrderUpdate += OnOrderUpdate;
         }
 
+        /// <summary>
+        /// Submits a market entry order attached to an ATM strategy.
+        /// The ATM strategy manages SL/TP orders automatically.
+        /// </summary>
+        public void StartAtmStrategy(string atmStrategyName, TradePlan plan)
+        {
+            if (string.IsNullOrEmpty(atmStrategyName))
+                throw new ArgumentException("ATM strategy name is required", nameof(atmStrategyName));
+
+            if (_account == null)
+                throw new InvalidOperationException("Account is not available. Make sure ChartTrader is enabled and an account is selected.");
+
+            if (_indicator?.Instrument == null)
+                throw new InvalidOperationException("Instrument is not available.");
+
+            _contracts        = plan.Contracts;
+            _entryFilledFired = false;
+            _currentAtmStrategy = atmStrategyName;
+
+            bool isLong = plan.StopPrice < plan.EntryPrice;
+            OrderAction action = isLong ? OrderAction.Buy : OrderAction.SellShort;
+
+            try
+            {
+                // Create entry order - name MUST be "Entry" for ATM to work
+                _entryOrder = _account.CreateOrder(
+                    _indicator.Instrument,
+                    action,
+                    OrderType.Market,
+                    OrderEntry.Manual,
+                    TimeInForce.Day,
+                    _contracts,
+                    0, 0,
+                    null,
+                    "Entry",  // CRITICAL: Must be exactly "Entry" for ATM
+                    DateTime.MaxValue,
+                    null);
+
+                if (_entryOrder == null)
+                    throw new InvalidOperationException("Failed to create entry order. Check account connection and instrument.");
+
+                // Start ATM strategy - this submits the entry and manages SL/TP
+                NinjaTrader.NinjaScript.AtmStrategy.StartAtmStrategy(atmStrategyName, _entryOrder);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to start ATM strategy '{atmStrategyName}': {ex.Message}. Make sure the ATM strategy template exists in NinjaTrader (Chart Trader > ATM Strategy).", ex);
+            }
+        }
+
+        /// <summary>
+        /// Legacy method for unmanaged entry without ATM.
+        /// Kept for backward compatibility.
+        /// </summary>
         public void SubmitEntry(TradePlan plan)
         {
             _contracts        = plan.Contracts;
             _entryFilledFired = false;
+            _currentAtmStrategy = null;
 
             bool isLong = plan.StopPrice < plan.EntryPrice;
             OrderAction action = isLong ? OrderAction.Buy : OrderAction.SellShort;
@@ -58,51 +110,34 @@ namespace TradeAssistant.Infrastructure
             _account.Submit(new[] { _entryOrder });
         }
 
+        /// <summary>
+        /// No longer used with ATM strategy approach.
+        /// ATM strategies handle bracket orders automatically.
+        /// </summary>
+        [Obsolete("Use StartAtmStrategy instead. ATM strategies handle brackets automatically.")]
         public void SubmitBracket(double stopPrice, double tpPrice, int contracts)
         {
-            bool isLong = _entryOrder != null && _entryOrder.OrderAction == OrderAction.Buy;
-
-            _stopOrder = _account.CreateOrder(
-                _indicator.Instrument,
-                isLong ? OrderAction.Sell : OrderAction.BuyToCover,
-                OrderType.StopMarket,
-                OrderEntry.Manual,
-                TimeInForce.Gtc,
-                contracts,
-                0, stopPrice,
-                null,
-                "TA_Stop",
-                DateTime.MaxValue,
-                null);
-
-            _tpOrder = _account.CreateOrder(
-                _indicator.Instrument,
-                isLong ? OrderAction.Sell : OrderAction.BuyToCover,
-                OrderType.Limit,
-                OrderEntry.Manual,
-                TimeInForce.Gtc,
-                contracts,
-                tpPrice, 0,
-                null,
-                "TA_TP",
-                DateTime.MaxValue,
-                null);
-
-            _account.Submit(new[] { _stopOrder, _tpOrder });
+            // ATM strategies manage SL/TP automatically
+            // This method is kept for interface compatibility but does nothing
         }
 
+        /// <summary>
+        /// Modify stop is handled by ATM strategy when used.
+        /// </summary>
         public void ModifyStop(double newStopPrice)
         {
-            if (_stopOrder == null) return;
-            _stopOrder.StopPriceChanged = newStopPrice;
-            _account.Change(new[] { _stopOrder });
+            // With ATM strategies, users modify stops via ChartTrader drag
+            // Manual modification not supported when using ATM
+            if (string.IsNullOrEmpty(_currentAtmStrategy))
+            {
+                // Only for legacy non-ATM mode
+                // Implementation removed as ATM is now primary
+            }
         }
 
         public void CancelAll()
         {
             if (_entryOrder != null) TryCancel(_entryOrder);
-            if (_stopOrder  != null) TryCancel(_stopOrder);
-            if (_tpOrder    != null) TryCancel(_tpOrder);
         }
 
         private void TryCancel(Order order)
@@ -119,9 +154,10 @@ namespace TradeAssistant.Infrastructure
         {
             Order order = e.Order;
 
+            // Track entry fill for both ATM and non-ATM modes
             if (!_entryFilledFired &&
                 _entryOrder != null &&
-                order.Name  == "TA_Entry" &&
+                order.Name == _entryOrder.Name &&
                 order.OrderState == OrderState.Filled)
             {
                 _entryFilledFired = true;
@@ -129,15 +165,18 @@ namespace TradeAssistant.Infrastructure
                 return;
             }
 
-            if ((order.Name == "TA_Entry" || order.Name == "TA_Stop" || order.Name == "TA_TP") &&
+            // Handle cancellations
+            if (order.Name == _entryOrder?.Name &&
                 (order.OrderState == OrderState.Cancelled || order.OrderState == OrderState.Rejected))
             {
                 OrderCancelled?.Invoke($"{order.Name} {order.OrderState}");
                 return;
             }
 
-            if ((order.Name == "TA_Stop" || order.Name == "TA_TP") &&
-                order.OrderState == OrderState.Filled)
+            // With ATM strategies, position close is tracked via ATM events
+            // We can detect this by monitoring for stop/target fills
+            if (order.OrderState == OrderState.Filled &&
+                (order.Name.Contains("Stop") || order.Name.Contains("Target") || order.Name.Contains("TP")))
             {
                 PositionClosed?.Invoke();
             }

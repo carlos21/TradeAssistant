@@ -5,35 +5,29 @@ using TradeAssistant.Infrastructure;
 namespace TradeAssistant.Application
 {
     /// <summary>
-    /// Orchestrates the full order submission sequence on spacebar press.
-    ///
-    /// Flow:
-    ///   1. ValidatePlan (contracts >= 1)
-    ///   2. StateMachine: Planning → Armed (caller responsibility before calling Execute)
-    ///   3. SubmitEntry (market order)
-    ///   4. On OrderFilled: submit stop market + limit TP
-    ///   5. StateMachine: Submitted → Active
-    ///   6. Activate BreakEvenService
+    /// Orchestrates order submission on spacebar press.
+    /// 
+    /// Supports two modes:
+    ///   1. Legacy: Unmanaged entry + manual bracket orders
+    ///   2. ATM: Entry with attached ATM strategy for native ChartTrader visualization
     /// </summary>
     public sealed class ExecutionCoordinator
     {
         private readonly IOrderAdapter      _orders;
         private readonly TradeStateMachine  _stateMachine;
-        private readonly BreakEvenService   _breakEvenService;
 
         private TradePlan _pendingPlan;
+        private string    _pendingAtmStrategy;
 
         public event Action<string> ExecutionError;
         public event Action<string> StatusMessage;
 
         public ExecutionCoordinator(
             IOrderAdapter      orders,
-            TradeStateMachine  stateMachine,
-            BreakEvenService   breakEvenService)
+            TradeStateMachine  stateMachine)
         {
             _orders           = orders           ?? throw new ArgumentNullException(nameof(orders));
             _stateMachine     = stateMachine     ?? throw new ArgumentNullException(nameof(stateMachine));
-            _breakEvenService = breakEvenService ?? throw new ArgumentNullException(nameof(breakEvenService));
 
             _orders.EntryFilled    += OnEntryFilled;
             _orders.OrderCancelled += OnOrderCancelled;
@@ -41,8 +35,48 @@ namespace TradeAssistant.Application
         }
 
         /// <summary>
-        /// Called on spacebar. Validates and submits the entry order.
-        /// Assumes state machine is already in Armed state.
+        /// Execute with ATM strategy attachment.
+        /// Provides native ChartTrader SL/TP visualization.
+        /// </summary>
+        public void ExecuteWithAtm(TradePlan plan, string atmStrategyName)
+        {
+            if (plan == null || !plan.IsValid)
+            {
+                ExecutionError?.Invoke(plan?.ValidationError ?? "No valid trade plan.");
+                return;
+            }
+
+            if (plan.Contracts < 1)
+            {
+                ExecutionError?.Invoke("Cannot execute: 0 contracts calculated.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(atmStrategyName))
+            {
+                ExecutionError?.Invoke("ATM strategy not selected.");
+                return;
+            }
+
+            _pendingPlan = plan;
+            _pendingAtmStrategy = atmStrategyName;
+
+            try
+            {
+                _orders.StartAtmStrategy(atmStrategyName, plan);
+                _stateMachine.TransitionTo(TradeState.Submitted);
+                StatusMessage?.Invoke($"ATM '{atmStrategyName}' — {plan.Contracts} contract(s). Waiting for fill…");
+            }
+            catch (Exception ex)
+            {
+                ExecutionError?.Invoke($"ATM execution failed: {ex.Message}");
+                _stateMachine.TryTransitionTo(TradeState.Cancelled);
+            }
+        }
+
+        /// <summary>
+        /// Legacy: Unmanaged entry without ATM.
+        /// Kept for backward compatibility.
         /// </summary>
         public void Execute(TradePlan plan)
         {
@@ -59,12 +93,13 @@ namespace TradeAssistant.Application
             }
 
             _pendingPlan = plan;
+            _pendingAtmStrategy = null;
 
             try
             {
                 _orders.SubmitEntry(plan);
                 _stateMachine.TransitionTo(TradeState.Submitted);
-                StatusMessage?.Invoke($"Submitted market {(plan.EntryPrice > 0 ? "order" : "")} — {plan.Contracts} contract(s). Waiting for fill…");
+                StatusMessage?.Invoke($"Submitted market order — {plan.Contracts} contract(s). Waiting for fill…");
             }
             catch (Exception ex)
             {
@@ -77,17 +112,25 @@ namespace TradeAssistant.Application
         {
             if (_pendingPlan == null) return;
 
+            // If using ATM strategy, ATM handles SL/TP automatically
+            if (!string.IsNullOrEmpty(_pendingAtmStrategy))
+            {
+                _stateMachine.TransitionTo(TradeState.Active);
+                StatusMessage?.Invoke(
+                    $"Filled at {fillPrice:F2}. ATM '{_pendingAtmStrategy}' managing SL/TP.");
+                
+                // Note: Break-even with ATM is handled by ATM template settings
+                // We don't activate our break-even service when using ATM
+                return;
+            }
+
+            // Legacy: Manual bracket submission
             try
             {
-                // Adjust stop/TP to use the actual fill price if market moved
                 _orders.SubmitBracket(_pendingPlan.StopPrice, _pendingPlan.TpPrice, _pendingPlan.Contracts);
                 _stateMachine.TransitionTo(TradeState.Active);
                 StatusMessage?.Invoke(
                     $"Filled at {fillPrice:F2}. Stop: {_pendingPlan.StopPrice:F2}, TP: {_pendingPlan.TpPrice:F2}");
-
-                // Only activate break-even if BE at R:R is set (> 0)
-                if (_pendingPlan.BreakEvenPrice > 0)
-                    _breakEvenService.Start(_pendingPlan.BreakEvenPrice, fillPrice);
             }
             catch (Exception ex)
             {
@@ -102,16 +145,16 @@ namespace TradeAssistant.Application
                 _stateMachine.TryTransitionTo(TradeState.Idle);
 
             _pendingPlan = null;
+            _pendingAtmStrategy = null;
         }
 
         private void OnPositionClosed()
         {
-            _breakEvenService.Stop();
-
             if (_stateMachine.TryTransitionTo(TradeState.Closed))
                 _stateMachine.TryTransitionTo(TradeState.Idle);
 
             _pendingPlan = null;
+            _pendingAtmStrategy = null;
             StatusMessage?.Invoke("Position closed. Ready for next trade.");
         }
 

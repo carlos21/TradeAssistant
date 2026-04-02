@@ -21,34 +21,7 @@ namespace TradeAssistant.UI
         // Callbacks wired by the indicator for execution and direction toggle
         public Action ExecuteRequested      { get; set; }
         public Action ToggleDirectionAction { get; set; }
-        public Action<string> AccountChangedAction { get; set; }
-
-        // ── Account properties ───────────────────────────────────────────────
-
-        private List<string> _availableAccounts = new List<string>();
-        public List<string> AvailableAccounts
-        {
-            get => _availableAccounts;
-            set => SetProperty(ref _availableAccounts, value);
-        }
-
-        private string _selectedAccount;
-        public string SelectedAccount
-        {
-            get => _selectedAccount;
-            set
-            {
-                if (_selectedAccount != value)
-                {
-                    _selectedAccount = value;
-                    OnPropertyChanged();
-                    AccountChangedAction?.Invoke(value);
-                }
-            }
-        }
-
-        public bool CanChangeAccount => _stateMachine?.Current == TradeState.Idle || 
-                                        _stateMachine?.Current == TradeState.Planning;
+        public Action<int> TierChangedAction { get; set; } // Arg = new tier index
 
         // ── Input properties ─────────────────────────────────────────────────
 
@@ -77,7 +50,7 @@ namespace TradeAssistant.UI
 
         public string RiskValueLabel => _riskMode == RiskMode.Percentage ? "Risk %" : "Risk $";
 
-        private double _rrRatio = 2.0;
+        private double _rrRatio = 4.0;
         public double RrRatio
         {
             get => _rrRatio;
@@ -87,30 +60,6 @@ namespace TradeAssistant.UI
                 _controller.SetRrRatio(value);
             }
         }
-
-        private double _breakEvenRr = 0.0;
-        public double BreakEvenRr
-        {
-            get => _breakEvenRr;
-            set
-            {
-                SetProperty(ref _breakEvenRr, value);
-                _controller.SetBreakEvenRr(value);
-            }
-        }
-
-        private bool _testMode = false;
-        public bool TestMode
-        {
-            get => _testMode;
-            set
-            {
-                SetProperty(ref _testMode, value);
-                TestModeChangedAction?.Invoke(value);
-            }
-        }
-
-        public Action<bool> TestModeChangedAction { get; set; }
 
         private TradeDirection _direction = TradeDirection.Long;
         public TradeDirection Direction
@@ -125,6 +74,64 @@ namespace TradeAssistant.UI
         }
 
         public string DirectionLabel => Direction == TradeDirection.Long ? "LONG" : "SHORT";
+
+        // ── Display properties ───────────────────────────────────────────────
+
+        private bool _showTradeBoxes = true;
+        public bool ShowTradeBoxes
+        {
+            get => _showTradeBoxes;
+            set
+            {
+                if (_showTradeBoxes != value)
+                {
+                    SetProperty(ref _showTradeBoxes, value);
+                    ShowTradeBoxesChanged?.Invoke(value);
+                }
+            }
+        }
+
+        public event Action<bool> ShowTradeBoxesChanged;
+
+        // ── ATM Tier properties ──────────────────────────────────────────────
+
+        private int _currentTierIndex = 1;
+        public int CurrentTierIndex
+        {
+            get => _currentTierIndex;
+            private set
+            {
+                if (_currentTierIndex != value)
+                {
+                    SetProperty(ref _currentTierIndex, value);
+                    OnPropertyChanged(nameof(CurrentTierDisplay));
+                    OnPropertyChanged(nameof(SlPoints));
+                }
+            }
+        }
+
+        private int _totalTiers = 4;
+        public int TotalTiers
+        {
+            get => _totalTiers;
+            private set => SetProperty(ref _totalTiers, value);
+        }
+
+        public string CurrentTierDisplay => $"Tier {_currentTierIndex + 1}/{_totalTiers}";
+
+        private double _slPoints = 20;
+        public double SlPoints
+        {
+            get => _slPoints;
+            private set => SetProperty(ref _slPoints, value);
+        }
+
+        private string _atmStrategyName = "";
+        public string AtmStrategyName
+        {
+            get => _atmStrategyName;
+            private set => SetProperty(ref _atmStrategyName, value);
+        }
 
         // ── Output / display properties ──────────────────────────────────────
 
@@ -163,7 +170,7 @@ namespace TradeAssistant.UI
             private set => SetProperty(ref _tpPrice, value);
         }
 
-        private string _statusMessage = "Drag SL/TP to adjust";
+        private string _statusMessage = "Click ▲▼ to change SL tier, drag SL line to snap";
         public string StatusMessage
         {
             get => _statusMessage;
@@ -196,6 +203,12 @@ namespace TradeAssistant.UI
         private readonly ICommand _toggleDirectionCommand;
         public ICommand ToggleDirectionCommand => _toggleDirectionCommand;
 
+        private readonly ICommand _cycleTierUpCommand;
+        public ICommand CycleTierUpCommand => _cycleTierUpCommand;
+
+        private readonly ICommand _cycleTierDownCommand;
+        public ICommand CycleTierDownCommand => _cycleTierDownCommand;
+
         // ── Constructor ──────────────────────────────────────────────────────
 
         public TradePlannerViewModel(TradePlannerController controller, TradeStateMachine stateMachine)
@@ -205,18 +218,43 @@ namespace TradeAssistant.UI
             _dispatcher   = Dispatcher.CurrentDispatcher;
 
             _executeCommand = new RelayCommand(
-                () => ExecuteRequested?.Invoke(),
+                () => 
+                {
+                    try { ExecuteRequested?.Invoke(); }
+                    catch (Exception ex) { StatusMessage = $"Execute error: {ex.Message}"; }
+                },
                 () => CanExecuteTrade && _stateMachine.Current == TradeState.Planning);
 
             _toggleDirectionCommand = new RelayCommand(() =>
             {
-                Direction = Direction == TradeDirection.Long
-                    ? TradeDirection.Short
-                    : TradeDirection.Long;
-                ToggleDirectionAction?.Invoke();
+                try
+                {
+                    Direction = Direction == TradeDirection.Long
+                        ? TradeDirection.Short
+                        : TradeDirection.Long;
+                    ToggleDirectionAction?.Invoke();
+                }
+                catch (Exception ex) { StatusMessage = $"Direction error: {ex.Message}"; }
             });
 
+            _cycleTierUpCommand = new RelayCommand(
+                () => 
+                {
+                    try { _controller.CycleTierUp(); }
+                    catch (Exception ex) { StatusMessage = $"Tier up error: {ex.Message}"; }
+                },
+                () => _stateMachine.Current == TradeState.Planning);
+
+            _cycleTierDownCommand = new RelayCommand(
+                () => 
+                {
+                    try { _controller.CycleTierDown(); }
+                    catch (Exception ex) { StatusMessage = $"Tier down error: {ex.Message}"; }
+                },
+                () => _stateMachine.Current == TradeState.Planning);
+
             _controller.PlanUpdated += OnPlanUpdated;
+            _controller.TierChanged += OnTierChanged;
             _stateMachine.StateChanged += OnStateChanged;
         }
 
@@ -240,7 +278,16 @@ namespace TradeAssistant.UI
                     StopPrice     = plan.StopPrice;
                     TpPrice       = plan.TpPrice;
                     CanExecuteTrade = true;
-                    StatusMessage = $"{plan.Contracts} contract(s) | Risk ${plan.RiskDollars:F0} | Profit ${plan.ProfitDollars:F0}";
+                    
+                    // Update tier info display
+                    var tierInfo = _controller.CurrentTierInfo;
+                    if (tierInfo != null)
+                    {
+                        SlPoints = tierInfo.SlPoints;
+                        AtmStrategyName = tierInfo.AtmStrategyName;
+                    }
+                    
+                    StatusMessage = $"{Contracts} ctr | SL {SlPoints:F0}pt | Risk ${RiskDollars:F0} | TP ${ProfitDollars:F0}";
                 }
                 else
                 {
@@ -253,18 +300,33 @@ namespace TradeAssistant.UI
             });
         }
 
+        private void OnTierChanged(SlTierInfo tierInfo)
+        {
+            RunOnUI(() =>
+            {
+                if (tierInfo != null)
+                {
+                    CurrentTierIndex = tierInfo.Index;
+                    SlPoints = tierInfo.SlPoints;
+                    AtmStrategyName = tierInfo.AtmStrategyName;
+                    TierChangedAction?.Invoke(tierInfo.Index);
+                }
+            });
+        }
+
         private void OnStateChanged(TradeState previous, TradeState next)
         {
             RunOnUI(() =>
             {
                 IsArmed = next == TradeState.Armed;
                 (_executeCommand as RelayCommand)?.RaiseCanExecuteChanged();
-                OnPropertyChanged(nameof(CanChangeAccount));
+                (_cycleTierUpCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                (_cycleTierDownCommand as RelayCommand)?.RaiseCanExecuteChanged();
 
                 switch (next)
                 {
                     case TradeState.Idle:
-                        StatusMessage   = "Drag SL/TP to adjust";
+                        StatusMessage   = "Click ▲▼ to change SL tier, drag SL line to snap";
                         Contracts       = 0;
                         RiskDollars     = 0;
                         ProfitDollars   = 0;
@@ -277,10 +339,10 @@ namespace TradeAssistant.UI
                         StatusMessage = "Submitted — awaiting fill…";
                         break;
                     case TradeState.Active:
-                        StatusMessage = "Active — monitoring for break-even";
+                        StatusMessage = "Active — ATM managing SL/TP";
                         break;
                     case TradeState.BreakEvenTriggered:
-                        StatusMessage = "Break-even triggered — stop at entry";
+                        StatusMessage = "Break-even triggered";
                         break;
                     case TradeState.Closed:
                         StatusMessage = "Trade closed.";
@@ -292,9 +354,28 @@ namespace TradeAssistant.UI
             });
         }
 
+        /// <summary>
+        /// Cycles to next tier (UP key)
+        /// </summary>
+        public void CycleTierUp()
+        {
+            try { _controller.CycleTierUp(); }
+            catch (Exception ex) { StatusMessage = $"Tier error: {ex.Message}"; }
+        }
+
+        /// <summary>
+        /// Cycles to previous tier (DOWN key)
+        /// </summary>
+        public void CycleTierDown()
+        {
+            try { _controller.CycleTierDown(); }
+            catch (Exception ex) { StatusMessage = $"Tier error: {ex.Message}"; }
+        }
+
         public void Dispose()
         {
             _controller.PlanUpdated    -= OnPlanUpdated;
+            _controller.TierChanged    -= OnTierChanged;
             _stateMachine.StateChanged -= OnStateChanged;
         }
     }

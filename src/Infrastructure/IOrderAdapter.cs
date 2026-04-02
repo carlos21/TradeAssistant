@@ -5,22 +5,41 @@ namespace TradeAssistant.Infrastructure
 {
     /// <summary>
     /// Abstracts NinjaTrader order operations.
-    /// All events fire on the UI thread (or via Dispatcher if needed).
+    /// Supports both unmanaged orders and ATM strategy attachment.
     /// </summary>
     public interface IOrderAdapter
     {
         // ── Commands ────────────────────────────────────────────────────────
 
-        /// <summary>Submit an unmanaged market entry order.</summary>
+        /// <summary>
+        /// Submit an unmanaged market entry order.
+        /// Legacy method - prefer StartAtmStrategy for native ChartTrader visualization.
+        /// </summary>
         void SubmitEntry(TradePlan plan);
 
-        /// <summary>Attach stop market and limit TP orders after entry fill.</summary>
+        /// <summary>
+        /// Submit entry with ATM strategy attachment.
+        /// Provides native ChartTrader SL/TP visualization.
+        /// Entry order name MUST be "Entry".
+        /// </summary>
+        void StartAtmStrategy(string atmStrategyName, TradePlan plan);
+
+        /// <summary>
+        /// Attach stop market and limit TP orders after entry fill.
+        /// Deprecated: Use StartAtmStrategy instead.
+        /// </summary>
+        [Obsolete("Use StartAtmStrategy instead")]
         void SubmitBracket(double stopPrice, double tpPrice, int contracts);
 
-        /// <summary>Modify the stop order price (used for break-even move).</summary>
+        /// <summary>
+        /// Modify the stop order price (used for break-even move).
+        /// Limited support when using ATM strategies.
+        /// </summary>
         void ModifyStop(double newStopPrice);
 
-        /// <summary>Cancel all open orders for this trade.</summary>
+        /// <summary>
+        /// Cancel all open orders for this trade.
+        /// </summary>
         void CancelAll();
 
         // ── Events ──────────────────────────────────────────────────────────
