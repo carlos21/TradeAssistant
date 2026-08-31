@@ -1,4 +1,5 @@
 using NinjaTrader.Cbi;
+using TradeAssistant.Application.Ports;
 
 namespace TradeAssistant.Infrastructure
 {

@@ -1,4 +1,4 @@
-namespace TradeAssistant.Infrastructure
+namespace TradeAssistant.Application.Ports
 {
     /// <summary>
     /// Provides account financial data.
@@ -6,6 +6,6 @@ namespace TradeAssistant.Infrastructure
     public interface IAccountDataProvider
     {
         double AccountBalance { get; }
-        string AccountName   { get; }
+        string AccountName    { get; }
     }
 }

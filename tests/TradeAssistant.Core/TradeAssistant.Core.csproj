@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>TradeAssistant</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Domain\**\*.cs" />
+    <Compile Include="..\..\src\Application\**\*.cs" />
+    <Compile Include="..\..\src\UI\ViewModelBase.cs" />
+    <Compile Include="..\..\src\UI\RelayCommand.cs" />
+    <Compile Include="..\..\src\UI\TradePlannerViewModel.cs" />
+  </ItemGroup>
+
+</Project>

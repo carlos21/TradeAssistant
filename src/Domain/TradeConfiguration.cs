@@ -1,55 +1,69 @@
+using System;
+
 namespace TradeAssistant.Domain
 {
     /// <summary>
-    /// Immutable value object holding all user inputs required to compute a TradePlan.
+    /// Immutable value object holding all user-configured inputs for a trade plan.
     /// </summary>
     public sealed class TradeConfiguration
     {
-        public double AccountBalance   { get; }
-        public double RiskPercent      { get; }   // e.g. 1.0 = 1%
-        public double FixedRiskDollars { get; }   // 0 means "use percent"
-        public double RrRatio          { get; }   // e.g. 4.0
-        public TradeDirection Direction { get; }
-        public double EntryPrice       { get; }
-        public double StopPrice        { get; }
-        public double TickSize         { get; }
-        public double TickValue        { get; }
+        public RiskMode RiskMode        { get; }
+        public double   RiskValue       { get; }
+        public double   RrRatio         { get; }
+
+        /// <summary>RR multiple at which the stop auto-moves to break-even. 0 disables auto BE.</summary>
+        public double   BreakEvenRr     { get; }
+
+        /// <summary>SL distance snapping step in points (default 5).</summary>
+        public double   SlStepPoints    { get; }
+
+        /// <summary>Initial SL distance in points when planning starts.</summary>
+        public double   DefaultSlPoints { get; }
 
         public TradeConfiguration(
-            double accountBalance,
-            double riskPercent,
-            double fixedRiskDollars,
-            double rrRatio,
-            TradeDirection direction,
-            double entryPrice,
-            double stopPrice,
-            double tickSize,
-            double tickValue)
+            RiskMode riskMode,
+            double   riskValue,
+            double   rrRatio,
+            double   breakEvenRr,
+            double   slStepPoints    = StopSnapper.DefaultStepPoints,
+            double   defaultSlPoints = 20.0)
         {
-            AccountBalance   = accountBalance;
-            RiskPercent      = riskPercent;
-            FixedRiskDollars = fixedRiskDollars;
-            RrRatio          = rrRatio;
-            Direction        = direction;
-            EntryPrice       = entryPrice;
-            StopPrice        = stopPrice;
-            TickSize         = tickSize;
-            TickValue        = tickValue;
+            if (riskValue <= 0)
+                throw new ArgumentException("Risk value must be positive.", nameof(riskValue));
+            if (rrRatio <= 0)
+                throw new ArgumentException("RR ratio must be positive.", nameof(rrRatio));
+            if (breakEvenRr < 0)
+                throw new ArgumentException("Break-even RR cannot be negative.", nameof(breakEvenRr));
+            if (slStepPoints <= 0)
+                throw new ArgumentException("SL step must be positive.", nameof(slStepPoints));
+            if (defaultSlPoints < slStepPoints)
+                throw new ArgumentException("Default SL must be at least one step.", nameof(defaultSlPoints));
+
+            RiskMode        = riskMode;
+            RiskValue       = riskValue;
+            RrRatio         = rrRatio;
+            BreakEvenRr     = breakEvenRr;
+            SlStepPoints    = slStepPoints;
+            DefaultSlPoints = StopSnapper.SnapDistance(defaultSlPoints, slStepPoints);
         }
 
-        /// <summary>Returns a copy with a new stop price.</summary>
-        public TradeConfiguration WithStop(double stopPrice) =>
-            new TradeConfiguration(AccountBalance, RiskPercent, FixedRiskDollars,
-                RrRatio, Direction, EntryPrice, stopPrice, TickSize, TickValue);
+        /// <summary>Returns a copy with the given fields replaced.</summary>
+        public TradeConfiguration With(
+            RiskMode? riskMode    = null,
+            double?   riskValue   = null,
+            double?   rrRatio     = null,
+            double?   breakEvenRr = null)
+        {
+            return new TradeConfiguration(
+                riskMode    ?? RiskMode,
+                riskValue   ?? RiskValue,
+                rrRatio     ?? RrRatio,
+                breakEvenRr ?? BreakEvenRr,
+                SlStepPoints,
+                DefaultSlPoints);
+        }
 
-        /// <summary>Returns a copy with a new entry price.</summary>
-        public TradeConfiguration WithEntry(double entryPrice) =>
-            new TradeConfiguration(AccountBalance, RiskPercent, FixedRiskDollars,
-                RrRatio, Direction, entryPrice, StopPrice, TickSize, TickValue);
-
-        /// <summary>Returns a copy with a new direction.</summary>
-        public TradeConfiguration WithDirection(TradeDirection direction) =>
-            new TradeConfiguration(AccountBalance, RiskPercent, FixedRiskDollars,
-                RrRatio, direction, EntryPrice, StopPrice, TickSize, TickValue);
+        public static TradeConfiguration Default =>
+            new TradeConfiguration(RiskMode.FixedAmount, 240.0, 4.0, 1.0);
     }
 }

@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compile-only verification project. Builds ALL of src/ against the real
+    NinjaTrader 8 assemblies so NT8 API errors surface locally without opening
+    the NinjaScript Editor. Mirrors the references of NinjaTrader.Custom.csproj.
+    Not a runnable output — build it to check for compile errors:
+      dotnet build tests/TradeAssistant.CompileCheck
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyName>TradeAssistant.CompileCheck</AssemblyName>
+    <RootNamespace>TradeAssistant</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Nt8Stubs.cs" />
+    <Compile Include="..\..\src\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="NinjaTrader.Core">
+      <HintPath>C:\Program Files\NinjaTrader 8\bin\NinjaTrader.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="NinjaTrader.Gui">
+      <HintPath>C:\Program Files\NinjaTrader 8\bin\NinjaTrader.Gui.dll</HintPath>
+    </Reference>
+    <Reference Include="SharpDX">
+      <HintPath>C:\Program Files\NinjaTrader 8\bin\SharpDX.dll</HintPath>
+    </Reference>
+    <Reference Include="SharpDX.Direct2D1">
+      <HintPath>C:\Program Files\NinjaTrader 8\bin\SharpDX.Direct2D1.dll</HintPath>
+    </Reference>
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.ComponentModel.DataAnnotations" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+
+</Project>

@@ -1,4 +1,5 @@
 using NinjaTrader.NinjaScript;
+using TradeAssistant.Application.Ports;
 
 namespace TradeAssistant.Infrastructure
 {
@@ -15,9 +16,11 @@ namespace TradeAssistant.Infrastructure
             _script = script;
         }
 
-        public double TickSize   => _script.Instrument.MasterInstrument.TickSize;
-        public double TickValue  => _script.Instrument.MasterInstrument.PointValue * _script.Instrument.MasterInstrument.TickSize;
-        public double PointValue => _script.Instrument.MasterInstrument.PointValue;
-        public string InstrumentName => _script.Instrument.MasterInstrument.Name;
+        public double TickSize   => _script?.Instrument?.MasterInstrument?.TickSize ?? 0.25;
+        public double TickValue  => _script?.Instrument?.MasterInstrument != null
+            ? _script.Instrument.MasterInstrument.PointValue * _script.Instrument.MasterInstrument.TickSize
+            : 0;
+        public double PointValue => _script?.Instrument?.MasterInstrument?.PointValue ?? 0;
+        public string InstrumentName => _script?.Instrument?.MasterInstrument?.Name ?? "Unknown";
     }
 }

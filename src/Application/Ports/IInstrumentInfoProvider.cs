@@ -1,4 +1,4 @@
-namespace TradeAssistant.Infrastructure
+namespace TradeAssistant.Application.Ports
 {
     /// <summary>
     /// Provides instrument-specific tick data.
@@ -6,9 +6,9 @@ namespace TradeAssistant.Infrastructure
     /// </summary>
     public interface IInstrumentInfoProvider
     {
-        double TickSize    { get; }
-        double TickValue   { get; }
-        double PointValue  { get; }
+        double TickSize       { get; }
+        double TickValue      { get; }
+        double PointValue     { get; }
         string InstrumentName { get; }
     }
 }

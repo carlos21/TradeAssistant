@@ -73,13 +73,13 @@
             <Setter Property="Cursor"       Value="Hand"/>
         </Style>
 
-        <!-- Tier button style -->
-        <Style x:Key="TierButtonStyle" TargetType="Button">
+        <!-- Break-even button style -->
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
             <Setter Property="Background"   Value="#3D3D3D"/>
             <Setter Property="Foreground"   Value="White"/>
             <Setter Property="FontSize"     Value="12"/>
-            <Setter Property="Width"        Value="30"/>
-            <Setter Property="Height"       Value="26"/>
+            <Setter Property="FontWeight"   Value="Bold"/>
+            <Setter Property="Height"       Value="28"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor"       Value="Hand"/>
         </Style>
@@ -112,44 +112,34 @@
 
         <Separator Background="#333" Margin="0,0,0,10"/>
 
-        <!-- SL Tier Selection -->
+        <!-- SL Points adjuster (▼/▲ buttons, ±5 points per click) -->
         <Border Background="#2D2D2D" BorderBrush="#555" BorderThickness="1" CornerRadius="4" Margin="0,0,0,10" Padding="8">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition/>
-                    <RowDefinition/>
-                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Tier navigation -->
-                <Button Grid.Row="0" Grid.Column="0" 
-                        Content="▼" 
-                        Command="{Binding CycleTierDownCommand}"
-                        Style="{StaticResource TierButtonStyle}"
-                        ToolTip="Shorter SL"/>
-                
-                <TextBlock Grid.Row="0" Grid.Column="1" 
-                           Text="{Binding CurrentTierDisplay}" 
-                           Style="{StaticResource ValueStyle}" 
+                <Button Grid.Column="0"
+                        Content="▼"
+                        Command="{Binding NudgeDownCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Width="30" Height="26" FontWeight="Normal"
+                        ToolTip="Tighter SL (-5 pts)"/>
+
+                <TextBlock Grid.Column="1"
+                           Text="{Binding SlPoints, StringFormat=SL: {0:F0} points}"
+                           Style="{StaticResource ValueStyle}"
                            FontSize="14"
                            HorizontalAlignment="Center"/>
-                
-                <Button Grid.Row="0" Grid.Column="2" 
-                        Content="▲" 
-                        Command="{Binding CycleTierUpCommand}"
-                        Style="{StaticResource TierButtonStyle}"
-                        ToolTip="Larger SL"/>
 
-                <!-- SL Points display -->
-                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
-                           Text="{Binding SlPoints, StringFormat=SL: {0:F0} points}" 
-                           Style="{StaticResource LabelStyle}" 
-                           HorizontalAlignment="Center"
-                           Margin="0,4,0,0"/>
+                <Button Grid.Column="2"
+                        Content="▲"
+                        Command="{Binding NudgeUpCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Width="30" Height="26" FontWeight="Normal"
+                        ToolTip="Wider SL (+5 pts)"/>
             </Grid>
         </Border>
 
@@ -174,6 +164,16 @@
             <TextBlock Grid.Column="0" Text="R:R Ratio" Style="{StaticResource LabelStyle}"/>
             <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
                        Text="{Binding RrRatio, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F1}}"/>
+        </Grid>
+
+        <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120"/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="BE at R:R" Style="{StaticResource LabelStyle}"/>
+            <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
+                       Text="{Binding BreakEvenRr, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F1}}"/>
         </Grid>
 
         <Separator Background="#333" Margin="0,0,0,10"/>
@@ -208,17 +208,6 @@
                        Text="{Binding ProfitDollars, StringFormat=${0:F0}}"/>
         </Grid>
 
-        <!-- ATM Strategy Name -->
-        <Grid Margin="0,4,0,4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
-                <ColumnDefinition/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="ATM Strategy"   Style="{StaticResource LabelStyle}"/>
-            <TextBlock Grid.Column="1" Style="{StaticResource ValueStyle}" FontSize="11"
-                       Text="{Binding AtmStrategyName}" Foreground="#FFA726"/>
-        </Grid>
-
         <Separator Background="#333" Margin="0,6,0,10"/>
 
         <!-- ARMED indicator -->
@@ -241,8 +230,14 @@
                 Style="{StaticResource ExecuteButtonStyle}"
                 Margin="0,0,0,4"/>
 
+        <!-- Manual break-even -->
+        <Button Content="BREAK-EVEN"
+                Command="{Binding BreakEvenCommand}"
+                Style="{StaticResource SecondaryButtonStyle}"
+                Margin="0,6,0,0"/>
+
         <!-- Hotkey hints -->
-        <TextBlock Text="SPACE: Execute  |  ESC: Cancel"
+        <TextBlock Text="SPACE: Execute | B: Break-even | ESC: Reset"
                    Foreground="#666" FontSize="10"
                    HorizontalAlignment="Center"
                    Margin="0,8,0,0"/>

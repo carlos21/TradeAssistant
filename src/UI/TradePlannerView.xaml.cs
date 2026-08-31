@@ -99,7 +99,12 @@ namespace TradeAssistant.UI
             // Risk value input (label changes based on RiskMode)
             root.Children.Add(MakeDynamicInputRow("RiskValueLabel", "RiskValue", "{0:F2}"));
             root.Children.Add(MakeInputRow("R:R Ratio",    "RrRatio",          "{0:F1}"));
+            root.Children.Add(MakeInputRow("BE at R:R",    "BreakEvenRr",      "{0:F1}"));
             root.Children.Add(MakeCheckboxRow("Show Boxes", "ShowTradeBoxes"));
+            root.Children.Add(MakeSeparator());
+
+            // SL adjuster: ▼ / SL points / ▲ (±5 pts per click)
+            root.Children.Add(MakeSlAdjusterRow());
             root.Children.Add(MakeSeparator());
 
             // Plan display
@@ -153,6 +158,32 @@ namespace TradeAssistant.UI
             };
             execBtn.SetBinding(Button.CommandProperty, new Binding("ExecuteCommand"));
             root.Children.Add(execBtn);
+
+            // Break-even button (manual)
+            var beBtn = new Button
+            {
+                Content         = "BREAK-EVEN",
+                Background      = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
+                Foreground      = Brushes.White,
+                FontSize        = 12,
+                FontWeight      = FontWeights.Bold,
+                Height          = 28,
+                Cursor          = System.Windows.Input.Cursors.Hand,
+                BorderThickness = new Thickness(0),
+                Margin          = new Thickness(0, 6, 0, 0)
+            };
+            beBtn.SetBinding(Button.CommandProperty, new Binding("BreakEvenCommand"));
+            root.Children.Add(beBtn);
+
+            // Hotkey hints
+            root.Children.Add(new TextBlock
+            {
+                Text                = "SPACE: Execute | B: Break-even | ESC: Reset",
+                Foreground          = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
+                FontSize            = 10,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin              = new Thickness(0, 8, 0, 0)
+            });
 
             return root;
         }
@@ -353,6 +384,66 @@ namespace TradeAssistant.UI
             return grid;
         }
 
+        private static UIElement MakeSlAdjusterRow()
+        {
+            var border = new Border
+            {
+                Background    = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D)),
+                BorderBrush   = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+                BorderThickness = new Thickness(1),
+                CornerRadius  = new CornerRadius(4),
+                Padding       = new Thickness(8),
+                Margin        = new Thickness(0, 0, 0, 5)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var downBtn = MakeNudgeButton("▼", "NudgeDownCommand", "Tighter SL (-5 pts)");
+            Grid.SetColumn(downBtn, 0);
+            grid.Children.Add(downBtn);
+
+            var label = new TextBlock
+            {
+                FontWeight          = FontWeights.SemiBold,
+                Foreground          = Brushes.White,
+                FontSize            = 14,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment   = VerticalAlignment.Center
+            };
+            label.SetBinding(TextBlock.TextProperty,
+                new Binding("SlPoints") { StringFormat = "SL: {0:F0} points" });
+            Grid.SetColumn(label, 1);
+            grid.Children.Add(label);
+
+            var upBtn = MakeNudgeButton("▲", "NudgeUpCommand", "Wider SL (+5 pts)");
+            Grid.SetColumn(upBtn, 2);
+            grid.Children.Add(upBtn);
+
+            border.Child = grid;
+            return border;
+        }
+
+        private static Button MakeNudgeButton(string content, string commandBinding, string tooltip)
+        {
+            var btn = new Button
+            {
+                Content         = content,
+                Background      = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
+                Foreground      = Brushes.White,
+                FontSize        = 12,
+                Width           = 30,
+                Height          = 26,
+                BorderThickness = new Thickness(0),
+                Cursor          = System.Windows.Input.Cursors.Hand,
+                ToolTip         = tooltip
+            };
+            btn.SetBinding(Button.CommandProperty, new Binding(commandBinding));
+            return btn;
+        }
+
         private static UIElement MakeSeparator()
         {
             return new Separator
@@ -408,6 +499,12 @@ namespace TradeAssistant.UI
                 case Key.End:  box.CaretIndex = box.Text.Length; return;
                 case Key.A when Keyboard.Modifiers == ModifierKeys.Control:
                     box.SelectAll();
+                    return;
+                case Key.C when Keyboard.Modifiers == ModifierKeys.Control:
+                case Key.V when Keyboard.Modifiers == ModifierKeys.Control:
+                case Key.X when Keyboard.Modifiers == ModifierKeys.Control:
+                case Key.Z when Keyboard.Modifiers == ModifierKeys.Control:
+                    e.Handled = false;
                     return;
                 default:
                     char c = NumericKeyToChar(e.Key);

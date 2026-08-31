@@ -8,6 +8,7 @@ using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript.Indicators;
 using SharpDX;
 using TradeAssistant.Application;
+using TradeAssistant.Application.Ports;
 using TradeAssistant.Domain;
 using TradeAssistant.Infrastructure;
 using TradeAssistant.UI;
@@ -16,44 +17,56 @@ using RiskMode = TradeAssistant.Domain.RiskMode;
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
+    /// <summary>
+    /// Thin composition root: wires the Domain/Application/Infrastructure/UI
+    /// layers together and translates raw chart events into controller calls.
+    /// All trading logic lives in the layers — none here.
+    ///
+    /// Hotkeys: SPACE = execute bracket | B = break-even | ESC = reset.
+    /// SL distance adjusts via drag or the ▲/▼ panel buttons (±5 pts).
+    /// </summary>
     public class TradeAssistantIndicator : Indicator
     {
         // ── Layer objects ─────────────────────────────────────────────────────
-        private TradeStateMachine           _stateMachine;
-        private NinjaInstrumentInfoProvider _instrumentInfo;
-        private NinjaAccountDataProvider    _accountData;
-        private NinjaOrderAdapter           _orderAdapter;
-        private TradePlannerController      _controller;
-        private ExecutionCoordinator        _executionCoordinator;
-        private TradePlannerViewModel       _viewModel;
-        private TradePlannerView            _panel;
+        private TradeStateMachine            _stateMachine;
+        private NinjaInstrumentInfoProvider  _instrumentInfo;
+        private IAccountDataProvider         _accountData;
+        private NinjaOrderGateway            _orderGateway;
+        private NinjaPriceFeed               _priceFeed;
+        private TradePlannerController       _controller;
+        private BracketExecutionCoordinator  _coordinator;
+        private BreakEvenMonitor             _breakEvenMonitor;
+        private ChartInteractionController   _interaction;
+        private ChartScaleAxisConverter      _axis;
+        private TradePlannerViewModel        _viewModel;
+        private TradePlannerView             _panel;
 
-        // ── Chart state ───────────────────────────────────────────────────────
-        private double    _stopPrice   = 0;
-        private double    _tpPrice     = 0;
-        private double    _entryPrice  = 0;
+        // Cached handlers for clean unsubscribe
+        private Action<string> _statusHandler;
+        private Action<string> _errorHandler;
+        private Action<string> _beStatusHandler;
+        private Action<string> _beErrorHandler;
+
+        // ── Chart state (render cache only) ───────────────────────────────────
         private TradePlan _currentPlan = TradePlan.Empty;
-        private ChartScale _cachedScale;
-        private bool       _initialized = false;
+        private double    _stopPrice;
+        private double    _tpPrice;
+        private float     _rectLeftX;
+        private bool      _initialized;
+        private bool      _accountResolved;
+        private Account   _currentAccount;
 
-        private enum DragMode { None, Sl, Tp }
-        private DragMode _dragMode = DragMode.None;
-
-        private const double HitTolerance = 12.0;
-        private const float  RectWidth    = 120f;
+        private const double HitTolerancePx = 12.0;
+        private const float  RectWidth      = 120f;
 
         // ── SharpDX resources ─────────────────────────────────────────────────
         private SharpDX.Direct2D1.SolidColorBrush _slZoneBrush;
         private SharpDX.Direct2D1.SolidColorBrush _tpZoneBrush;
-        private SharpDX.Direct2D1.SolidColorBrush _slLineBrush;
-        private SharpDX.Direct2D1.SolidColorBrush _tpLineBrush;
         private SharpDX.Direct2D1.SolidColorBrush _entryLineBrush;
         private SharpDX.Direct2D1.SolidColorBrush _labelBrush;
         private SharpDX.Direct2D1.SolidColorBrush _slLabelBgBrush;
         private SharpDX.Direct2D1.SolidColorBrush _tpLabelBgBrush;
-        private SharpDX.Direct2D1.SolidColorBrush _entryLabelBgBrush;
-        private SharpDX.DirectWrite.TextFormat     _labelFormat;
-        private SharpDX.DirectWrite.TextFormat     _labelFormatSmall;
+        private SharpDX.DirectWrite.TextFormat    _labelFormat;
 
         // ─────────────────────────────────────────────────────────────────────
         // NT8 lifecycle
@@ -63,22 +76,29 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (State == State.SetDefaults)
             {
-                Description  = "TradeAssistant — manual futures trade planner and executor";
-                Name         = "TradeAssistant";
-                Calculate    = Calculate.OnEachTick;
-                IsOverlay    = true;
+                Description      = "TradeAssistant — manual futures trade planner with bracket execution";
+                Name             = "TradeAssistant";
+                Calculate        = Calculate.OnEachTick;
+                IsOverlay        = true;
                 DrawOnPricePanel = true;
                 DisplayInDataBox = false;
 
-                RiskMode         = RiskMode.FixedAmount;
-                RiskValue        = 240.0;
-                RrRatio          = 4.0;
+                RiskMode        = RiskMode.FixedAmount;
+                RiskValue       = 240.0;
+                RrRatio         = 4.0;
+                BreakEvenRr     = 1.0;
+                DefaultSlPoints = 20.0;
             }
             else if (State == State.DataLoaded)
             {
-                InitializeLayers();
+                _stateMachine   = new TradeStateMachine();
+                _instrumentInfo = new NinjaInstrumentInfoProvider(this);
+                _priceFeed      = new NinjaPriceFeed(this);
+                _axis           = new ChartScaleAxisConverter();
+                _interaction    = new ChartInteractionController(_axis, HitTolerancePx);
+
                 SubscribeChartEvents();
-                OpenPanel();
+                TryInitializeAccount();
             }
             else if (State == State.Terminated)
             {
@@ -101,95 +121,90 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "R:R Ratio", Order = 3, GroupName = "Risk")]
         public double RrRatio { get; set; }
 
+        [NinjaScriptProperty]
+        [Display(Name = "Break-even at R:R (0 = off)", Order = 4, GroupName = "Risk")]
+        public double BreakEvenRr { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Default SL Points", Order = 5, GroupName = "Risk")]
+        public double DefaultSlPoints { get; set; }
+
         // ─────────────────────────────────────────────────────────────────────
         // Layer wiring
         // ─────────────────────────────────────────────────────────────────────
 
-        private void InitializeLayers()
+        private void TryInitializeAccount()
         {
             try
             {
+                if (_accountResolved) return;
+
                 Account account = ResolveAccount();
-                if (account == null)
-                {
-                    ShowError("Account not found", "Could not resolve account from ChartTrader. Make sure ChartTrader is enabled and an account is selected.");
-                    return;
-                }
+                if (account == null) return; // retry on next tick
 
-                _stateMachine   = new TradeStateMachine();
-                _instrumentInfo = new NinjaInstrumentInfoProvider(this);
-                _accountData    = new NinjaAccountDataProvider(account);
-                _orderAdapter   = new NinjaOrderAdapter(this, account);
-
-                _controller = new TradePlannerController(_instrumentInfo, _accountData);
-                _controller.SetRiskMode(RiskMode);
-                _controller.SetRiskValue(RiskValue);
-                _controller.SetRrRatio(RrRatio);
-
-                _executionCoordinator = new ExecutionCoordinator(_orderAdapter, _stateMachine);
-
-                _controller.PlanUpdated    += OnPlanUpdated;
-                _stateMachine.StateChanged += OnStateChanged;
-
-                _executionCoordinator.StatusMessage += msg =>
-                    Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.StatusMessage = msg; });
-                _executionCoordinator.ExecutionError += msg =>
-                    Dispatcher.InvokeAsync(() => { 
-                        if (_viewModel != null) _viewModel.StatusMessage = $"Error: {msg}"; 
-                        ShowError("Execution Error", msg);
-                    });
+                BuildServices(account);
+                _accountResolved = true;
+                _currentAccount  = account;
+                OpenPanel();
             }
             catch (Exception ex)
             {
-                ShowError("Initialization Error", $"Failed to initialize Trade Assistant: {ex.Message}\n\nStack trace: {ex.StackTrace}");
+                ShowError("Initialization Error", $"Failed to initialize Trade Assistant: {ex.Message}");
             }
+        }
+
+        private TradeConfiguration BuildConfig()
+        {
+            return new TradeConfiguration(RiskMode, RiskValue, RrRatio, BreakEvenRr,
+                StopSnapper.DefaultStepPoints, DefaultSlPoints);
+        }
+
+        private void BuildServices(Account account)
+        {
+            _accountData  = new NinjaAccountDataProvider(account);
+            _orderGateway = new NinjaOrderGateway(this, account);
+            _controller   = new TradePlannerController(_instrumentInfo, _accountData, BuildConfig());
+            _coordinator  = new BracketExecutionCoordinator(_orderGateway, _stateMachine, _instrumentInfo);
+            _breakEvenMonitor = new BreakEvenMonitor(_priceFeed, _orderGateway, _stateMachine);
+
+            _controller.PlanUpdated      += OnPlanUpdated;
+            _stateMachine.StateChanged   += OnStateChanged;
+            _coordinator.BracketPlaced   += OnBracketPlaced;
+
+            _statusHandler = msg =>
+                Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.StatusMessage = msg; });
+            _errorHandler = msg =>
+                Dispatcher.InvokeAsync(() =>
+                {
+                    if (_viewModel != null) _viewModel.StatusMessage = $"Error: {msg}";
+                    ShowError("Execution Error", msg);
+                });
+            _coordinator.StatusMessage  += _statusHandler;
+            _coordinator.ExecutionError += _errorHandler;
+
+            _beStatusHandler = msg =>
+                Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.StatusMessage = msg; });
+            _beErrorHandler = msg =>
+                Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.StatusMessage = $"Error: {msg}"; });
+            _breakEvenMonitor.StatusMessage += _beStatusHandler;
+            _breakEvenMonitor.Error         += _beErrorHandler;
         }
 
         private void OpenPanel()
         {
-            if (_controller == null || _stateMachine == null)
-                return;
-
             Dispatcher.InvokeAsync(() =>
             {
                 try
                 {
                     _viewModel = new TradePlannerViewModel(_controller, _stateMachine);
-                    _viewModel.RiskMode         = RiskMode;
-                    _viewModel.RiskValue        = RiskValue;
-                    _viewModel.RrRatio          = RrRatio;
+                    _viewModel.RiskMode    = RiskMode;
+                    _viewModel.RiskValue   = RiskValue;
+                    _viewModel.RrRatio     = RrRatio;
+                    _viewModel.BreakEvenRr = BreakEvenRr;
 
-                    _viewModel.ExecuteRequested      = OnExecuteRequested;
-                    _viewModel.ToggleDirectionAction = () =>
-                    {
-                        try
-                        {
-                            _controller.SetDirection(_viewModel.Direction);
-                            if (_entryPrice > 0)
-                            {
-                                if (_stopPrice > 0)
-                                {
-                                    double dist = Math.Abs(_entryPrice - _stopPrice);
-                                    _stopPrice = _viewModel.Direction == TradeDirection.Long
-                                        ? _entryPrice - dist
-                                        : _entryPrice + dist;
-                                    _stopPrice = SnapSlDistanceToMultipleOfFive(_stopPrice);
-                                    _controller.SetStopPrice(_stopPrice);
-                                }
-                                else
-                                {
-                                    PlaceDefaultStop();
-                                }
-                            }
-                            ForceRefresh();
-                        }
-                        catch (Exception ex)
-                        {
-                            ShowError("Direction Change Error", $"Failed to change direction: {ex.Message}");
-                        }
-                    };
-
-                    _viewModel.ShowTradeBoxesChanged += (show) => ForceRefresh();
+                    _viewModel.ExecuteRequested         = OnExecuteRequested;
+                    _viewModel.ManualBreakEvenRequested = () => _breakEvenMonitor.MoveToBreakEven();
+                    _viewModel.ShowTradeBoxesChanged   += show => ForceRefresh();
 
                     _panel = new TradePlannerView(_viewModel);
 
@@ -215,45 +230,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Auto-initialize SL/TP on first bar
-        // ─────────────────────────────────────────────────────────────────────
-
-        private void AutoInitialize()
-        {
-            try
-            {
-                if (_initialized || _entryPrice <= 0) return;
-                if (State == State.Historical && CurrentBar < BarsArray[0].Count - 1) return;
-                _initialized = true;
-
-                PlaceDefaultStop();
-                _stateMachine.TryTransitionTo(TradeState.Planning);
-            }
-            catch (Exception ex)
-            {
-                ShowError("Initialization Error", $"Failed to auto-initialize: {ex.Message}");
-            }
-        }
-
-        private void PlaceDefaultStop()
-        {
-            try
-            {
-                TradeDirection dir = _viewModel?.Direction ?? TradeDirection.Long;
-                double defaultDistance = 20.0;
-                _stopPrice = dir == TradeDirection.Long
-                    ? _entryPrice - defaultDistance
-                    : _entryPrice + defaultDistance;
-                _stopPrice = SnapSlDistanceToMultipleOfFive(_stopPrice);
-                _controller.SetStopPrice(_stopPrice);
-            }
-            catch (Exception ex)
-            {
-                ShowError("Stop Error", $"Failed to place default stop: {ex.Message}");
-            }
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
         // Price tick
         // ─────────────────────────────────────────────────────────────────────
 
@@ -263,17 +239,28 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 if (CurrentBar < 1) return;
 
-                _entryPrice = Close[0];
-                _controller.SetEntryPrice(_entryPrice);
+                if (!_accountResolved)
+                {
+                    TryInitializeAccount();
+                    if (!_accountResolved) return;
+                }
 
-                AutoInitialize();
+                _controller.SetEntryPrice(Close[0]);
 
+                if (!_initialized)
+                {
+                    if (State == State.Historical && CurrentBar < BarsArray[0].Count - 1) return;
+                    _initialized = true;
+                    _controller.PlaceDefaultStop();
+                    _stateMachine.TryTransitionTo(TradeState.Planning);
+                }
+
+                UpdateInteractionSnapshot();
                 ForceRefresh();
             }
             catch (Exception ex)
             {
-                // Only show error once to avoid spamming
-                // ShowError("Bar Update Error", $"Error in OnBarUpdate: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[TradeAssistant] OnBarUpdate error: {ex}");
             }
         }
 
@@ -286,93 +273,79 @@ namespace NinjaTrader.NinjaScript.Indicators
             DisposeBrushes();
             if (RenderTarget == null) return;
 
-            _slZoneBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.90f, 0.15f, 0.15f, 0.50f));
-            _tpZoneBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.75f, 0.25f, 0.50f));
-            _slLineBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.95f, 0.20f, 0.20f, 1.0f));
-            _tpLineBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.20f, 0.90f, 0.35f, 1.0f));
-            _entryLineBrush   = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(1.0f, 0.85f, 0.10f, 1.0f));
-            _slLabelBgBrush   = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.85f, 0.15f, 0.15f, 0.90f));
-            _tpLabelBgBrush   = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.65f, 0.20f, 0.90f));
-            _entryLabelBgBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.60f, 0.55f, 0.05f, 0.90f));
-            _labelBrush       = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, Color4.White);
-            _labelFormat      = new SharpDX.DirectWrite.TextFormat(
+            _slZoneBrush     = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.90f, 0.15f, 0.15f, 0.50f));
+            _tpZoneBrush     = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.75f, 0.25f, 0.50f));
+            _entryLineBrush  = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(1.0f, 0.85f, 0.10f, 1.0f));
+            _slLabelBgBrush  = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.85f, 0.15f, 0.15f, 0.90f));
+            _tpLabelBgBrush  = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.65f, 0.20f, 0.90f));
+            _labelBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, Color4.White);
+            _labelFormat     = new SharpDX.DirectWrite.TextFormat(
                 Core.Globals.DirectWriteFactory, "Segoe UI Semibold", 12.0f);
-            _labelFormatSmall = new SharpDX.DirectWrite.TextFormat(
-                Core.Globals.DirectWriteFactory, "Segoe UI", 10.0f);
         }
 
         protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
         {
             base.OnRender(chartControl, chartScale);
-            _cachedScale = chartScale;
+            _axis.Scale = chartScale;
 
             if (RenderTarget == null || _stateMachine == null) return;
-            if (_entryPrice <= 0) return;
 
-            // ── Planning Mode: Show planning zones ──
-            if (_stateMachine.Current != TradeState.Idle)
-            {
-                RenderPlanningZones(chartControl, chartScale);
-            }
-        }
+            double entryPrice = _controller != null ? _controller.EntryPrice : 0;
+            if (entryPrice <= 0) return;
 
-        private void RenderPlanningZones(ChartControl chartControl, ChartScale chartScale)
-        {
-            float lastBarX  = chartControl.GetXByBarIndex(ChartBars, CurrentBar);
-            float rectLeft  = lastBarX;
+            float lastBarX = chartControl.GetXByBarIndex(ChartBars, CurrentBar);
+            _rectLeftX = lastBarX;
             float rectRight = lastBarX + RectWidth;
 
-            float entryY = (float)chartScale.GetYByValue(_entryPrice);
+            UpdateInteractionSnapshot();
+
+            if (_stateMachine.Current == TradeState.Idle) return;
+
+            bool showBoxes = _viewModel?.ShowTradeBoxes ?? true;
+            if (!showBoxes) return;
+
+            float entryY = (float)chartScale.GetYByValue(entryPrice);
             float slY    = _stopPrice > 0 ? (float)chartScale.GetYByValue(_stopPrice) : 0;
             float tpY    = _tpPrice   > 0 ? (float)chartScale.GetYByValue(_tpPrice)   : 0;
 
-            // Check if trade boxes should be shown
-            bool showBoxes = _viewModel?.ShowTradeBoxes ?? true;
-
-            // ── SL zone ──
-            if (showBoxes && _stopPrice > 0 && _slZoneBrush != null)
+            // ── SL zone (draggable) ──
+            if (_stopPrice > 0 && _slZoneBrush != null)
             {
                 float top    = Math.Min(entryY, slY);
-                float bottom = Math.Max(entryY, slY);
-                float height = Math.Max(bottom - top, 1f);
+                float height = Math.Max(Math.Max(entryY, slY) - top, 1f);
+                RenderTarget.FillRectangle(new RectangleF(lastBarX, top, RectWidth, height), _slZoneBrush);
 
-                RenderTarget.FillRectangle(new RectangleF(rectLeft, top, RectWidth, height), _slZoneBrush);
-
-                double slPts = Math.Abs(_entryPrice - _stopPrice);
-                string slText = $"SL  -{slPts:F2} pts";
+                double slPts = Math.Abs(entryPrice - _stopPrice);
                 float slLabelY = slY > entryY ? slY + 3 : slY - 20;
-                DrawLabelWithBg(slText, rectLeft + 4, slLabelY, _slLabelBgBrush, _labelFormat);
+                DrawLabelWithBg($"SL  -{slPts:F0} pts", lastBarX + 4, slLabelY, _slLabelBgBrush);
             }
 
-            // ── TP zone ──
-            if (showBoxes && _tpPrice > 0 && _tpZoneBrush != null)
+            // ── TP zone (derived — not interactive) ──
+            if (_tpPrice > 0 && _tpZoneBrush != null)
             {
                 float top    = Math.Min(entryY, tpY);
-                float bottom = Math.Max(entryY, tpY);
-                float height = Math.Max(bottom - top, 1f);
+                float height = Math.Max(Math.Max(entryY, tpY) - top, 1f);
+                RenderTarget.FillRectangle(new RectangleF(lastBarX, top, RectWidth, height), _tpZoneBrush);
 
-                RenderTarget.FillRectangle(new RectangleF(rectLeft, top, RectWidth, height), _tpZoneBrush);
-
-                double tpPts = Math.Abs(_tpPrice - _entryPrice);
-                string tpText = $"TP  +{tpPts:F2} pts";
+                double tpPts = Math.Abs(_tpPrice - entryPrice);
                 float tpLabelY = tpY < entryY ? tpY - 20 : tpY + 3;
-                DrawLabelWithBg(tpText, rectLeft + 4, tpLabelY, _tpLabelBgBrush, _labelFormat);
+                DrawLabelWithBg($"TP  +{tpPts:F0} pts", lastBarX + 4, tpLabelY, _tpLabelBgBrush);
             }
 
             // ── Entry line ──
-            if (showBoxes && _entryLineBrush != null)
+            if (_entryLineBrush != null)
             {
                 RenderTarget.DrawLine(
-                    new Vector2(rectLeft, entryY), new Vector2(rectRight, entryY), _entryLineBrush, 2.0f);
+                    new Vector2(lastBarX, entryY), new Vector2(rectRight, entryY), _entryLineBrush, 2.0f);
             }
         }
 
         private void DrawLabelWithBg(string text, float x, float y,
-            SharpDX.Direct2D1.SolidColorBrush bgBrush, SharpDX.DirectWrite.TextFormat fmt)
+            SharpDX.Direct2D1.SolidColorBrush bgBrush)
         {
-            if (fmt == null || _labelBrush == null || RenderTarget == null) return;
+            if (_labelFormat == null || _labelBrush == null || RenderTarget == null) return;
             var layout = new SharpDX.DirectWrite.TextLayout(
-                Core.Globals.DirectWriteFactory, text, fmt, 300, 20);
+                Core.Globals.DirectWriteFactory, text, _labelFormat, 300, 20);
             float w = layout.Metrics.Width;
             float h = layout.Metrics.Height;
             if (bgBrush != null)
@@ -382,25 +355,34 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Mouse/keyboard
+        // Mouse / keyboard → ChartInteractionController
         // ─────────────────────────────────────────────────────────────────────
 
         private void SubscribeChartEvents()
         {
             if (ChartControl == null) return;
-            ChartControl.MouseDown      += OnChartMouseDown;
-            ChartControl.MouseMove      += OnChartMouseMove;
-            ChartControl.MouseUp        += OnChartMouseUp;
-            ChartControl.PreviewKeyDown += OnChartKeyDown;
+            ChartControl.PreviewMouseDown  += OnChartMouseDown;
+            ChartControl.PreviewMouseMove  += OnChartMouseMove;
+            ChartControl.PreviewMouseUp    += OnChartMouseUp;
+            ChartControl.LostMouseCapture  += OnChartLostMouseCapture;
+            ChartControl.PreviewKeyDown    += OnChartKeyDown;
         }
 
         private void UnsubscribeChartEvents()
         {
             if (ChartControl == null) return;
-            ChartControl.MouseDown      -= OnChartMouseDown;
-            ChartControl.MouseMove      -= OnChartMouseMove;
-            ChartControl.MouseUp        -= OnChartMouseUp;
-            ChartControl.PreviewKeyDown -= OnChartKeyDown;
+            ChartControl.PreviewMouseDown  -= OnChartMouseDown;
+            ChartControl.PreviewMouseMove  -= OnChartMouseMove;
+            ChartControl.PreviewMouseUp    -= OnChartMouseUp;
+            ChartControl.LostMouseCapture  -= OnChartLostMouseCapture;
+            ChartControl.PreviewKeyDown    -= OnChartKeyDown;
+        }
+
+        private void UpdateInteractionSnapshot()
+        {
+            if (_interaction == null || _controller == null) return;
+            _interaction.UpdateSnapshot(
+                _controller.EntryPrice, _stopPrice, _rectLeftX, _rectLeftX + RectWidth);
         }
 
         private void OnChartMouseDown(object sender, MouseButtonEventArgs e)
@@ -408,28 +390,14 @@ namespace NinjaTrader.NinjaScript.Indicators
             try
             {
                 if (e.LeftButton != MouseButtonState.Pressed) return;
-                if (_cachedScale == null) return;
-                if (_stateMachine == null) return;
+                if (_stateMachine == null || _stateMachine.Current != TradeState.Planning) return;
                 if (ChartControl == null) return;
 
                 System.Windows.Point pos = e.GetPosition(ChartControl);
-
-                if (_stateMachine.Current == TradeState.Planning)
+                if (_interaction.TryBeginDrag(pos.X, pos.Y))
                 {
-                    if (_stopPrice > 0 && IsNearPrice(_stopPrice, pos.Y))
-                    {
-                        _dragMode = DragMode.Sl;
-                        Mouse.Capture(ChartControl);
-                        e.Handled = true;
-                        return;
-                    }
-                    if (_tpPrice > 0 && IsNearPrice(_tpPrice, pos.Y))
-                    {
-                        _dragMode = DragMode.Tp;
-                        Mouse.Capture(ChartControl);
-                        e.Handled = true;
-                        return;
-                    }
+                    Mouse.Capture(ChartControl);
+                    e.Handled = true;
                 }
             }
             catch (Exception ex)
@@ -442,54 +410,27 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             try
             {
-                if (ChartControl == null) return;
-                
+                if (ChartControl == null || _interaction == null) return;
                 System.Windows.Point pos = e.GetPosition(ChartControl);
 
-                if (_dragMode == DragMode.None)
+                if (_interaction.TryDragTo(pos.Y, out double rawStopPrice))
                 {
-                    if (_cachedScale != null && _stateMachine != null)
-                    {
-                        bool nearPlanningSl = _stateMachine.Current == TradeState.Planning && 
-                                              _stopPrice > 0 && IsNearPrice(_stopPrice, pos.Y);
-                        bool nearPlanningTp = _stateMachine.Current == TradeState.Planning && 
-                                              _tpPrice > 0 && IsNearPrice(_tpPrice, pos.Y);
-
-                        bool nearBorder = nearPlanningSl || nearPlanningTp;
-                        ChartControl.Cursor = nearBorder ? Cursors.SizeNS : null;
-                    }
+                    _controller.SetStopFromPrice(rawStopPrice);
+                    UpdateInteractionSnapshot();
+                    e.Handled = true;
+                    ForceRefresh();
                     return;
                 }
 
-                if (_cachedScale == null) return;
-                if (_stateMachine == null) return;
-                double mousePrice = _cachedScale.GetValueByY((float)pos.Y);
-
-                if (_dragMode == DragMode.Sl)
-                {
-                    if (_stateMachine.Current == TradeState.Planning)
-                        PlaceStop(mousePrice);
-                }
-                else if (_dragMode == DragMode.Tp)
-                {
-                    if (_stateMachine.Current == TradeState.Planning)
-                    {
-                        double newTp     = SnapToTick(mousePrice);
-                        double stopDist  = Math.Abs(_entryPrice - _stopPrice);
-                        double tpDist    = Math.Abs(newTp - _entryPrice);
-                        double impliedRr = stopDist > 0 ? Math.Round((tpDist / stopDist) * 4.0) / 4.0 : 2.0;
-                        impliedRr        = Math.Max(0.25, impliedRr);
-
-                        _controller.SetRrRatio(impliedRr);
-                        Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.RrRatio = impliedRr; });
-                    }
-                    ForceRefresh();
-                }
+                // Hover cursor feedback
+                bool nearSl = _stateMachine != null &&
+                              _stateMachine.Current == TradeState.Planning &&
+                              _interaction.IsOverStopLine(pos.X, pos.Y);
+                ChartControl.Cursor = nearSl ? Cursors.SizeNS : null;
             }
             catch (Exception ex)
             {
-                // Don't show popup on every mouse move - just log to debug
-                // ShowError("Mouse Error", $"Error on mouse move: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[TradeAssistant] MouseMove error: {ex}");
             }
         }
 
@@ -497,44 +438,27 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             try
             {
-                if (_dragMode == DragMode.None) return;
-                if (ChartControl == null) return;
-
-                System.Windows.Point pos = e.GetPosition(ChartControl);
+                if (_interaction == null || !_interaction.IsDragging) return;
+                _interaction.EndDrag();
                 Mouse.Capture(null);
-
-                if (_cachedScale != null && _stateMachine != null)
-                {
-                    double mousePrice = _cachedScale.GetValueByY((float)pos.Y);
-
-                    if (_dragMode == DragMode.Sl)
-                    {
-                        double newPrice = SnapSlDistanceToMultipleOfFive(mousePrice);
-                        if (_stateMachine.Current == TradeState.Planning)
-                            PlaceStop(newPrice);
-                    }
-                    else if (_dragMode == DragMode.Tp)
-                    {
-                        double newPrice = SnapToTick(mousePrice);
-                        if (_stateMachine.Current == TradeState.Planning)
-                        {
-                            double stopDist = Math.Abs(_entryPrice - _stopPrice);
-                            double tpDist = Math.Abs(newPrice - _entryPrice);
-                            double impliedRr = stopDist > 0 ? Math.Round((tpDist / stopDist) * 4.0) / 4.0 : 2.0;
-                            impliedRr = Math.Max(0.25, impliedRr);
-                            _controller.SetRrRatio(impliedRr);
-                            Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.RrRatio = impliedRr; });
-                        }
-                    }
-                }
-
-                _dragMode = DragMode.None;
+                if (ChartControl != null) ChartControl.Cursor = null;
+                e.Handled = true;
                 ForceRefresh();
             }
             catch (Exception ex)
             {
                 ShowError("Mouse Error", $"Error on mouse up: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Capture can be stolen by the chart or ChartTrader mid-drag. Never
+        /// leave the interaction controller stuck — always reset.
+        /// </summary>
+        private void OnChartLostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            _interaction?.CancelDrag();
+            if (ChartControl != null) ChartControl.Cursor = null;
         }
 
         private void OnChartKeyDown(object sender, KeyEventArgs e)
@@ -546,182 +470,165 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 case Key.Space:
                     e.Handled = true;
-                    OnSpacePressed();
+                    OnExecuteRequested();
                     break;
-                    
+
+                case Key.B:
+                    e.Handled = true;
+                    _breakEvenMonitor?.MoveToBreakEven();
+                    break;
+
                 case Key.Escape:
                     e.Handled = true;
-                    _stateMachine?.Reset();
-                    ResetChartState();
+                    _interaction?.CancelDrag();
+                    Mouse.Capture(null);
+                    if (ChartControl != null) ChartControl.Cursor = null;
+                    _breakEvenMonitor?.Deactivate();
+                    _stateMachine.Reset();
+                    _controller?.ClearStop();
+                    _stopPrice   = 0;
+                    _tpPrice     = 0;
+                    _currentPlan = TradePlan.Empty;
+                    _initialized = false;
+                    ForceRefresh();
                     break;
             }
         }
 
-        private void OnSpacePressed()
+        // ─────────────────────────────────────────────────────────────────────
+        // Execution & break-even
+        // ─────────────────────────────────────────────────────────────────────
+
+        private void OnExecuteRequested()
         {
             try
             {
+                EnsureAccountCurrent();
+
                 if (_stateMachine.Current != TradeState.Planning) return;
 
                 if (!_currentPlan.IsValid)
                 {
-                    ShowError("Invalid Trade Plan", _currentPlan.ValidationError ?? "Trade plan is not valid.");
+                    ShowError("Invalid Trade Plan",
+                        _currentPlan.ValidationError ?? "Trade plan is not valid.");
                     return;
                 }
 
-                _stateMachine.TransitionTo(TradeState.Armed);
-                
-                // Use ATM strategy execution if available
-                string atmStrategy = _controller?.CurrentAtmStrategyName;
-                if (!string.IsNullOrEmpty(atmStrategy))
-                {
-                    _executionCoordinator.ExecuteWithAtm(_currentPlan, atmStrategy);
-                }
-                else
-                {
-                    _executionCoordinator.Execute(_currentPlan);
-                }
+                _coordinator.Execute(_currentPlan);
             }
             catch (Exception ex)
             {
-                ShowError("Execution Error", $"Failed to execute trade: {ex.Message}\n\nStack trace: {ex.StackTrace}");
+                ShowError("Execution Error", $"Failed to execute trade: {ex.Message}");
             }
+        }
+
+        private void OnBracketPlaced(BracketInfo bracket)
+        {
+            _breakEvenMonitor.Activate(
+                bracket.FillPrice, bracket.StopPrice,
+                _controller.Config.BreakEvenRr, bracket.Direction);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Layer event handlers
+        // ─────────────────────────────────────────────────────────────────────
+
+        private void OnPlanUpdated(TradePlan plan)
+        {
+            _currentPlan = plan;
+            if (plan.IsValid)
+            {
+                _stopPrice = plan.StopPrice;
+                _tpPrice   = plan.TpPrice;
+            }
+            UpdateInteractionSnapshot();
+            ForceRefresh();
+        }
+
+        private void OnStateChanged(TradeState previous, TradeState next)
+        {
+            if (next == TradeState.Idle)
+            {
+                _breakEvenMonitor?.Deactivate();
+
+                // Trade finished (closed or cancelled) → return to planning
+                // automatically, keeping the last SL distance (the entry keeps
+                // following the live price). Esc resets use Planning→Idle via
+                // Reset(), so they are not affected by this branch.
+                if ((previous == TradeState.Closed || previous == TradeState.Cancelled) &&
+                    _controller != null && _stateMachine.Current == TradeState.Idle)
+                {
+                    if (!_controller.HasStop) _controller.PlaceDefaultStop();
+                    _controller.Recalculate();
+                    _stateMachine.TryTransitionTo(TradeState.Planning);
+                }
+            }
+
+            Dispatcher.InvokeAsync(() => ForceRefresh());
+        }
+
+        private void EnsureAccountCurrent()
+        {
+            Account account = ResolveAccount();
+            if (account == null) return;
+            if (_currentAccount != null && _currentAccount.Name == account.Name) return;
+
+            _currentAccount = account;
+
+            _accountData = new NinjaAccountDataProvider(account);
+            _controller?.ReplaceAccountDataProvider(_accountData);
+            _controller?.Recalculate();
+
+            var oldGateway = _orderGateway;
+            _orderGateway  = new NinjaOrderGateway(this, account);
+            _coordinator?.ReplaceOrderGateway(_orderGateway);
+            _breakEvenMonitor?.ReplaceOrderGateway(_orderGateway);
+            oldGateway?.Dispose();
+
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (_viewModel != null)
+                    _viewModel.StatusMessage = $"Account changed to {account.Name}";
+            });
         }
 
         // ─────────────────────────────────────────────────────────────────────
         // Helpers
         // ─────────────────────────────────────────────────────────────────────
 
-        private void PlaceStop(double price)
-        {
-            try
-            {
-                _stopPrice = SnapSlDistanceToMultipleOfFive(price);
-                _controller.SetStopPrice(_stopPrice);
-                ForceRefresh();
-            }
-            catch (Exception ex)
-            {
-                ShowError("Stop Placement Error", $"Failed to place stop: {ex.Message}");
-            }
-        }
-
-        private double SnapToTick(double price)
-        {
-            double tick = _instrumentInfo?.TickSize ?? 0.25;
-            return tick > 0 ? Math.Round(price / tick) * tick : price;
-        }
-
-        private double SnapSlDistanceToMultipleOfFive(double desiredStopPrice)
-        {
-            double distance = Math.Abs(_entryPrice - desiredStopPrice);
-            double snappedDistance = Math.Round(distance / 5.0) * 5.0;
-            bool isBelow = desiredStopPrice < _entryPrice;
-            return isBelow ? _entryPrice - snappedDistance : _entryPrice + snappedDistance;
-        }
-
-        private bool IsNearPrice(double price, double pixelY)
-        {
-            if (_cachedScale == null || price <= 0) return false;
-            float pricePixelY = (float)_cachedScale.GetYByValue(price);
-            return Math.Abs(pricePixelY - pixelY) <= HitTolerance;
-        }
-
-        private void OnPlanUpdated(TradePlan plan)
-        {
-            _currentPlan = plan;
-            if (plan.IsValid)
-                _stopPrice = plan.StopPrice;
-            _tpPrice = plan.TpPrice;
-            ForceRefresh();
-        }
-
-        private void OnStateChanged(TradeState previous, TradeState next)
-        {
-            Dispatcher.InvokeAsync(() => ForceRefresh());
-        }
-
-        private void OnExecuteRequested()
-        {
-            try
-            {
-                if (_stateMachine.Current != TradeState.Planning) return;
-                
-                if (!_currentPlan.IsValid)
-                {
-                    ShowError("Invalid Trade Plan", _currentPlan.ValidationError ?? "Trade plan is not valid.");
-                    return;
-                }
-                
-                _stateMachine.TryTransitionTo(TradeState.Armed);
-                
-                // Use ATM strategy execution if available
-                string atmStrategy = _controller?.CurrentAtmStrategyName;
-                if (!string.IsNullOrEmpty(atmStrategy))
-                {
-                    _executionCoordinator.ExecuteWithAtm(_currentPlan, atmStrategy);
-                }
-                else
-                {
-                    _executionCoordinator.Execute(_currentPlan);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowError("Execution Error", $"Failed to execute trade: {ex.Message}\n\nStack trace: {ex.StackTrace}");
-            }
-        }
-
-        private void ResetChartState()
-        {
-            _stopPrice   = 0;
-            _tpPrice     = 0;
-            _currentPlan = TradePlan.Empty;
-            _initialized = false;
-            ForceRefresh();
-        }
-
-        private void DisposeBrushes()
-        {
-            _slZoneBrush?.Dispose();       _slZoneBrush       = null;
-            _tpZoneBrush?.Dispose();       _tpZoneBrush       = null;
-            _slLineBrush?.Dispose();       _slLineBrush       = null;
-            _tpLineBrush?.Dispose();       _tpLineBrush       = null;
-            _entryLineBrush?.Dispose();    _entryLineBrush    = null;
-            _slLabelBgBrush?.Dispose();    _slLabelBgBrush    = null;
-            _tpLabelBgBrush?.Dispose();    _tpLabelBgBrush    = null;
-            _entryLabelBgBrush?.Dispose(); _entryLabelBgBrush = null;
-            _labelBrush?.Dispose();        _labelBrush        = null;
-            _labelFormat?.Dispose();       _labelFormat       = null;
-            _labelFormatSmall?.Dispose();  _labelFormatSmall  = null;
-        }
-
         private Account ResolveAccount()
         {
             return ChartControl?.OwnerChart?.ChartTrader?.Account;
         }
 
-        /// <summary>
-        /// Shows an error message to the user via MessageBox and logs to status.
-        /// </summary>
         private void ShowError(string title, string message)
         {
             Dispatcher.InvokeAsync(() =>
             {
-                // Update status message if available
                 if (_viewModel != null)
                     _viewModel.StatusMessage = $"ERROR: {message}";
-                
-                // Show popup
+
                 try
                 {
-                    MessageBox.Show(message, $"Trade Assistant - {title}", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show(message, $"Trade Assistant - {title}",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 catch
                 {
-                    // If MessageBox fails, at least we tried to update the status
+                    // Status message already updated — popup is best-effort.
                 }
             });
+        }
+
+        private void DisposeBrushes()
+        {
+            _slZoneBrush?.Dispose();     _slZoneBrush     = null;
+            _tpZoneBrush?.Dispose();     _tpZoneBrush     = null;
+            _entryLineBrush?.Dispose();  _entryLineBrush  = null;
+            _slLabelBgBrush?.Dispose();  _slLabelBgBrush  = null;
+            _tpLabelBgBrush?.Dispose();  _tpLabelBgBrush  = null;
+            _labelBrush?.Dispose();      _labelBrush      = null;
+            _labelFormat?.Dispose();     _labelFormat     = null;
         }
 
         private void Cleanup()
@@ -735,8 +642,23 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (_stateMachine != null)
                     _stateMachine.StateChanged -= OnStateChanged;
 
-                _executionCoordinator?.Dispose();
-                _orderAdapter?.Dispose();
+                if (_coordinator != null)
+                {
+                    _coordinator.BracketPlaced -= OnBracketPlaced;
+                    if (_statusHandler != null) _coordinator.StatusMessage  -= _statusHandler;
+                    if (_errorHandler  != null) _coordinator.ExecutionError -= _errorHandler;
+                }
+
+                if (_breakEvenMonitor != null)
+                {
+                    if (_beStatusHandler != null) _breakEvenMonitor.StatusMessage -= _beStatusHandler;
+                    if (_beErrorHandler  != null) _breakEvenMonitor.Error         -= _beErrorHandler;
+                }
+
+                _coordinator?.Dispose();
+                _breakEvenMonitor?.Dispose();
+                _priceFeed?.Dispose();
+                _orderGateway?.Dispose();
 
                 Dispatcher.InvokeAsync(() =>
                 {
@@ -745,13 +667,31 @@ namespace NinjaTrader.NinjaScript.Indicators
                         _panel?.Detach();
                         _viewModel?.Dispose();
                     }
-                    catch { /* Ignore cleanup errors */ }
+                    catch { /* ignore cleanup errors */ }
                 });
             }
             catch (Exception ex)
             {
-                // Silently log cleanup errors - don't show popup during cleanup
-                // ShowError("Cleanup Error", $"Error during cleanup: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[TradeAssistant] Cleanup error: {ex}");
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Adapter: ChartScale → IPriceAxisConverter
+        // ─────────────────────────────────────────────────────────────────────
+
+        private sealed class ChartScaleAxisConverter : IPriceAxisConverter
+        {
+            public ChartScale Scale { get; set; }
+
+            public double PriceFromY(double y)
+            {
+                return Scale != null ? Scale.GetValueByY((float)y) : 0;
+            }
+
+            public double YFromPrice(double price)
+            {
+                return Scale != null ? Scale.GetYByValue(price) : 0;
             }
         }
     }

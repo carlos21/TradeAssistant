@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using TradeAssistant.Application;
@@ -18,10 +16,9 @@ namespace TradeAssistant.UI
         private readonly TradeStateMachine      _stateMachine;
         private readonly Dispatcher             _dispatcher;
 
-        // Callbacks wired by the indicator for execution and direction toggle
-        public Action ExecuteRequested      { get; set; }
-        public Action ToggleDirectionAction { get; set; }
-        public Action<int> TierChangedAction { get; set; } // Arg = new tier index
+        // Wired by the indicator (account refresh + execution / break-even)
+        public Action ExecuteRequested         { get; set; }
+        public Action ManualBreakEvenRequested { get; set; }
 
         // ── Input properties ─────────────────────────────────────────────────
 
@@ -61,6 +58,17 @@ namespace TradeAssistant.UI
             }
         }
 
+        private double _breakEvenRr = 1.0;
+        public double BreakEvenRr
+        {
+            get => _breakEvenRr;
+            set
+            {
+                SetProperty(ref _breakEvenRr, value);
+                _controller.SetBreakEvenRr(value);
+            }
+        }
+
         private TradeDirection _direction = TradeDirection.Long;
         public TradeDirection Direction
         {
@@ -93,47 +101,12 @@ namespace TradeAssistant.UI
 
         public event Action<bool> ShowTradeBoxesChanged;
 
-        // ── ATM Tier properties ──────────────────────────────────────────────
-
-        private int _currentTierIndex = 1;
-        public int CurrentTierIndex
-        {
-            get => _currentTierIndex;
-            private set
-            {
-                if (_currentTierIndex != value)
-                {
-                    SetProperty(ref _currentTierIndex, value);
-                    OnPropertyChanged(nameof(CurrentTierDisplay));
-                    OnPropertyChanged(nameof(SlPoints));
-                }
-            }
-        }
-
-        private int _totalTiers = 4;
-        public int TotalTiers
-        {
-            get => _totalTiers;
-            private set => SetProperty(ref _totalTiers, value);
-        }
-
-        public string CurrentTierDisplay => $"Tier {_currentTierIndex + 1}/{_totalTiers}";
-
-        private double _slPoints = 20;
+        private double _slPoints;
         public double SlPoints
         {
             get => _slPoints;
             private set => SetProperty(ref _slPoints, value);
         }
-
-        private string _atmStrategyName = "";
-        public string AtmStrategyName
-        {
-            get => _atmStrategyName;
-            private set => SetProperty(ref _atmStrategyName, value);
-        }
-
-        // ── Output / display properties ──────────────────────────────────────
 
         private int _contracts;
         public int Contracts
@@ -170,7 +143,7 @@ namespace TradeAssistant.UI
             private set => SetProperty(ref _tpPrice, value);
         }
 
-        private string _statusMessage = "Click ▲▼ to change SL tier, drag SL line to snap";
+        private string _statusMessage = "Drag SL line or use ▲▼ buttons to adjust (steps of 5 pts)";
         public string StatusMessage
         {
             get => _statusMessage;
@@ -195,6 +168,17 @@ namespace TradeAssistant.UI
             }
         }
 
+        private bool _canBreakEven;
+        public bool CanBreakEven
+        {
+            get => _canBreakEven;
+            set
+            {
+                SetProperty(ref _canBreakEven, value);
+                (_breakEvenCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+
         // ── Commands ─────────────────────────────────────────────────────────
 
         private readonly ICommand _executeCommand;
@@ -203,11 +187,14 @@ namespace TradeAssistant.UI
         private readonly ICommand _toggleDirectionCommand;
         public ICommand ToggleDirectionCommand => _toggleDirectionCommand;
 
-        private readonly ICommand _cycleTierUpCommand;
-        public ICommand CycleTierUpCommand => _cycleTierUpCommand;
+        private readonly ICommand _nudgeUpCommand;
+        public ICommand NudgeUpCommand => _nudgeUpCommand;
 
-        private readonly ICommand _cycleTierDownCommand;
-        public ICommand CycleTierDownCommand => _cycleTierDownCommand;
+        private readonly ICommand _nudgeDownCommand;
+        public ICommand NudgeDownCommand => _nudgeDownCommand;
+
+        private readonly ICommand _breakEvenCommand;
+        public ICommand BreakEvenCommand => _breakEvenCommand;
 
         // ── Constructor ──────────────────────────────────────────────────────
 
@@ -218,7 +205,7 @@ namespace TradeAssistant.UI
             _dispatcher   = Dispatcher.CurrentDispatcher;
 
             _executeCommand = new RelayCommand(
-                () => 
+                () =>
                 {
                     try { ExecuteRequested?.Invoke(); }
                     catch (Exception ex) { StatusMessage = $"Execute error: {ex.Message}"; }
@@ -232,30 +219,37 @@ namespace TradeAssistant.UI
                     Direction = Direction == TradeDirection.Long
                         ? TradeDirection.Short
                         : TradeDirection.Long;
-                    ToggleDirectionAction?.Invoke();
                 }
                 catch (Exception ex) { StatusMessage = $"Direction error: {ex.Message}"; }
             });
 
-            _cycleTierUpCommand = new RelayCommand(
-                () => 
-                {
-                    try { _controller.CycleTierUp(); }
-                    catch (Exception ex) { StatusMessage = $"Tier up error: {ex.Message}"; }
-                },
+            _nudgeUpCommand = new RelayCommand(
+                () => SafeNudge(+1),
                 () => _stateMachine.Current == TradeState.Planning);
 
-            _cycleTierDownCommand = new RelayCommand(
-                () => 
-                {
-                    try { _controller.CycleTierDown(); }
-                    catch (Exception ex) { StatusMessage = $"Tier down error: {ex.Message}"; }
-                },
+            _nudgeDownCommand = new RelayCommand(
+                () => SafeNudge(-1),
                 () => _stateMachine.Current == TradeState.Planning);
 
-            _controller.PlanUpdated += OnPlanUpdated;
-            _controller.TierChanged += OnTierChanged;
+            _breakEvenCommand = new RelayCommand(
+                () =>
+                {
+                    try { ManualBreakEvenRequested?.Invoke(); }
+                    catch (Exception ex) { StatusMessage = $"Break-even error: {ex.Message}"; }
+                },
+                () => CanBreakEven);
+
+            _controller.PlanUpdated    += OnPlanUpdated;
             _stateMachine.StateChanged += OnStateChanged;
+        }
+
+        /// <summary>Nudges the SL distance by ±1 step (5 pts). Used by the ▲▼ panel buttons.</summary>
+        public void NudgeStop(int steps) => SafeNudge(steps);
+
+        private void SafeNudge(int steps)
+        {
+            try { _controller.NudgeStop(steps); }
+            catch (Exception ex) { StatusMessage = $"Nudge error: {ex.Message}"; }
         }
 
         private void RunOnUI(Action action)
@@ -272,44 +266,22 @@ namespace TradeAssistant.UI
             {
                 if (plan.IsValid)
                 {
-                    Contracts     = plan.Contracts;
-                    RiskDollars   = plan.RiskDollars;
-                    ProfitDollars = plan.ProfitDollars;
-                    StopPrice     = plan.StopPrice;
-                    TpPrice       = plan.TpPrice;
+                    Contracts       = plan.Contracts;
+                    RiskDollars     = plan.RiskDollars;
+                    ProfitDollars   = plan.ProfitDollars;
+                    StopPrice       = plan.StopPrice;
+                    TpPrice         = plan.TpPrice;
+                    SlPoints        = plan.SlDistancePoints;
                     CanExecuteTrade = true;
-                    
-                    // Update tier info display
-                    var tierInfo = _controller.CurrentTierInfo;
-                    if (tierInfo != null)
-                    {
-                        SlPoints = tierInfo.SlPoints;
-                        AtmStrategyName = tierInfo.AtmStrategyName;
-                    }
-                    
-                    StatusMessage = $"{Contracts} ctr | SL {SlPoints:F0}pt | Risk ${RiskDollars:F0} | TP ${ProfitDollars:F0}";
+                    StatusMessage   = $"{Contracts} ctr | SL {SlPoints:F0}pt | Risk ${RiskDollars:F0} | TP ${ProfitDollars:F0}";
                 }
                 else
                 {
-                    Contracts     = 0;
-                    RiskDollars   = 0;
-                    ProfitDollars = 0;
+                    Contracts       = 0;
+                    RiskDollars     = 0;
+                    ProfitDollars   = 0;
                     CanExecuteTrade = false;
-                    StatusMessage = plan.ValidationError;
-                }
-            });
-        }
-
-        private void OnTierChanged(SlTierInfo tierInfo)
-        {
-            RunOnUI(() =>
-            {
-                if (tierInfo != null)
-                {
-                    CurrentTierIndex = tierInfo.Index;
-                    SlPoints = tierInfo.SlPoints;
-                    AtmStrategyName = tierInfo.AtmStrategyName;
-                    TierChangedAction?.Invoke(tierInfo.Index);
+                    StatusMessage   = plan.ValidationError;
                 }
             });
         }
@@ -318,31 +290,34 @@ namespace TradeAssistant.UI
         {
             RunOnUI(() =>
             {
-                IsArmed = next == TradeState.Armed;
-                (_executeCommand as RelayCommand)?.RaiseCanExecuteChanged();
-                (_cycleTierUpCommand as RelayCommand)?.RaiseCanExecuteChanged();
-                (_cycleTierDownCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                IsArmed      = next == TradeState.Armed;
+                CanBreakEven = next == TradeState.Active;
+                (_executeCommand   as RelayCommand)?.RaiseCanExecuteChanged();
+                (_nudgeUpCommand   as RelayCommand)?.RaiseCanExecuteChanged();
+                (_nudgeDownCommand as RelayCommand)?.RaiseCanExecuteChanged();
 
                 switch (next)
                 {
                     case TradeState.Idle:
-                        StatusMessage   = "Click ▲▼ to change SL tier, drag SL line to snap";
+                        StatusMessage   = "Drag SL line or use ▲▼ buttons to adjust (steps of 5 pts)";
                         Contracts       = 0;
                         RiskDollars     = 0;
                         ProfitDollars   = 0;
                         CanExecuteTrade = false;
                         break;
+                    case TradeState.Planning:
+                        break;
                     case TradeState.Armed:
-                        StatusMessage = "ARMED — press Space to execute";
+                        StatusMessage = "ARMED — submitting entry…";
                         break;
                     case TradeState.Submitted:
                         StatusMessage = "Submitted — awaiting fill…";
                         break;
                     case TradeState.Active:
-                        StatusMessage = "Active — ATM managing SL/TP";
+                        StatusMessage = "Active — bracket managing SL/TP";
                         break;
                     case TradeState.BreakEvenTriggered:
-                        StatusMessage = "Break-even triggered";
+                        StatusMessage = "Break-even — stop at entry";
                         break;
                     case TradeState.Closed:
                         StatusMessage = "Trade closed.";
@@ -354,28 +329,9 @@ namespace TradeAssistant.UI
             });
         }
 
-        /// <summary>
-        /// Cycles to next tier (UP key)
-        /// </summary>
-        public void CycleTierUp()
-        {
-            try { _controller.CycleTierUp(); }
-            catch (Exception ex) { StatusMessage = $"Tier error: {ex.Message}"; }
-        }
-
-        /// <summary>
-        /// Cycles to previous tier (DOWN key)
-        /// </summary>
-        public void CycleTierDown()
-        {
-            try { _controller.CycleTierDown(); }
-            catch (Exception ex) { StatusMessage = $"Tier error: {ex.Message}"; }
-        }
-
         public void Dispose()
         {
             _controller.PlanUpdated    -= OnPlanUpdated;
-            _controller.TierChanged    -= OnTierChanged;
             _stateMachine.StateChanged -= OnStateChanged;
         }
     }

@@ -14,7 +14,7 @@ namespace TradeAssistant.Domain
             {
                 { TradeState.Idle,               new HashSet<TradeState> { TradeState.Planning } },
                 { TradeState.Planning,           new HashSet<TradeState> { TradeState.Armed, TradeState.Idle } },
-                { TradeState.Armed,              new HashSet<TradeState> { TradeState.Submitted, TradeState.Planning } },
+                { TradeState.Armed,              new HashSet<TradeState> { TradeState.Submitted, TradeState.Planning, TradeState.Cancelled } },
                 { TradeState.Submitted,          new HashSet<TradeState> { TradeState.Active, TradeState.Cancelled } },
                 { TradeState.Active,             new HashSet<TradeState> { TradeState.BreakEvenTriggered, TradeState.Closed, TradeState.Cancelled } },
                 { TradeState.BreakEvenTriggered, new HashSet<TradeState> { TradeState.Closed, TradeState.Cancelled } },
