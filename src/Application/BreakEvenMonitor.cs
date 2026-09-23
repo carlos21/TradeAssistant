@@ -4,6 +4,19 @@ using TradeAssistant.Domain;
 
 namespace TradeAssistant.Application
 {
+    /// <summary>Outcome of a manual break-even attempt, so callers can explain rejections.</summary>
+    public enum BreakEvenResult
+    {
+        /// <summary>Stop moved to the fill price.</summary>
+        Moved,
+        /// <summary>No active trade — the state machine is not in Active.</summary>
+        NoActiveTrade,
+        /// <summary>Break-even was already applied to this position.</summary>
+        AlreadyAtBreakEven,
+        /// <summary>Bracket not placed yet (no fill price) or the stop order move failed.</summary>
+        NoWorkingStop
+    }
+
     /// <summary>
     /// Moves the live stop order to break-even — automatically when price reaches
     /// the configured RR multiple beyond the fill price, or manually on demand
@@ -68,14 +81,14 @@ namespace TradeAssistant.Application
         }
 
         /// <summary>
-        /// Manual break-even. Returns false when there is nothing to move
-        /// (no active position or already at break-even).
+        /// Manual break-even. Returns <see cref="BreakEvenResult.Moved"/> only when
+        /// the stop was actually moved; any other value explains why it was not.
         /// </summary>
-        public bool MoveToBreakEven()
+        public BreakEvenResult MoveToBreakEven()
         {
-            if (_fillPrice <= 0 || _strategy == null) return false;
-            if (_triggered) return false;
-            if (_stateMachine.Current != TradeState.Active) return false;
+            if (_fillPrice <= 0 || _strategy == null) return BreakEvenResult.NoWorkingStop;
+            if (_triggered) return BreakEvenResult.AlreadyAtBreakEven;
+            if (_stateMachine.Current != TradeState.Active) return BreakEvenResult.NoActiveTrade;
 
             try
             {
@@ -84,12 +97,12 @@ namespace TradeAssistant.Application
                 _armed     = false;
                 _stateMachine.TryTransitionTo(TradeState.BreakEvenTriggered);
                 StatusMessage?.Invoke($"Stop moved to break-even ({_fillPrice:F2}).");
-                return true;
+                return BreakEvenResult.Moved;
             }
             catch (Exception ex)
             {
                 Error?.Invoke($"Break-even failed: {ex.Message}");
-                return false;
+                return BreakEvenResult.NoWorkingStop;
             }
         }
 

@@ -153,7 +153,7 @@ namespace TradeAssistant.Tests.Application
         }
 
         [Fact]
-        public void Bracket_submission_throw_reports_flatten_warning_and_moves_to_active()
+        public void Bracket_submission_throw_reports_flatten_warning_moves_to_active_and_still_raises_BracketPlaced()
         {
             ToPlanning();
             _sut.Execute(LongPlan());
@@ -165,9 +165,15 @@ namespace TradeAssistant.Tests.Application
             Assert.Contains("Bracket submission failed: bracket boom", err);
             Assert.Contains("flatten it manually", err);
             // The entry filled, so the position is genuinely open: the machine
-            // now transitions to Active even though the bracket failed.
+            // transitions to Active even though the bracket failed.
             Assert.Equal(TradeState.Active, _sm.Current);
-            Assert.Empty(_brackets);
+            // BracketPlaced still fires so the break-even monitor is activated
+            // with the real fill price — manual BE works for the open position.
+            var info = Assert.Single(_brackets);
+            Assert.Equal(20000, info.FillPrice);
+            Assert.Equal(19980, info.StopPrice);
+            Assert.Equal(20080, info.TpPrice);
+            Assert.Equal(TradeDirection.Long, info.Direction);
         }
 
         [Fact]

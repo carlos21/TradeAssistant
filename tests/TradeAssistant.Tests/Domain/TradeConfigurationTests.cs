@@ -12,7 +12,7 @@ namespace TradeAssistant.Tests.Domain
             var c = TradeConfiguration.Default;
 
             Assert.Equal(RiskMode.FixedAmount, c.RiskMode);
-            Assert.Equal(240.0, c.RiskValue);
+            Assert.Equal(120.0, c.RiskValue);
             Assert.Equal(4.0, c.RrRatio);
             Assert.Equal(1.0, c.BreakEvenRr);
             Assert.Equal(5.0, c.SlStepPoints);

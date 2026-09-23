@@ -120,8 +120,13 @@ namespace TradeAssistant.Application
             catch (Exception ex)
             {
                 // The entry IS filled — the position is open even though the
-                // bracket failed. Move to Active so the state reflects reality.
+                // bracket failed. Move to Active so the state reflects reality,
+                // and still raise BracketPlaced so the break-even monitor is
+                // activated with the real fill price (manual BE must work for
+                // the open position even without working SL/TP orders).
                 _stateMachine.TryTransitionTo(TradeState.Active);
+                BracketPlaced?.Invoke(new BracketInfo(
+                    fillPrice, slPrice, tpPrice, plan.Contracts, plan.Direction));
                 ExecutionError?.Invoke(
                     $"Bracket submission failed: {ex.Message}. " +
                     "Position is OPEN WITHOUT SL/TP — flatten it manually.");

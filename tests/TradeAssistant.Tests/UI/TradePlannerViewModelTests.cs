@@ -265,7 +265,7 @@ namespace TradeAssistant.Tests.UI
         public void BreakEvenCommand_gated_on_CanBreakEven_and_invokes_action()
         {
             int calls = 0;
-            _vm.ManualBreakEvenRequested = () => calls++;
+            _vm.ManualBreakEvenRequested = () => { calls++; return BreakEvenResult.Moved; };
 
             Assert.False(_vm.BreakEvenCommand.CanExecute(null));
 
@@ -290,6 +290,87 @@ namespace TradeAssistant.Tests.UI
 
             _vm.BreakEvenCommand.Execute(null);
             Assert.Equal("Break-even error: nope", _vm.StatusMessage);
+        }
+
+        [Theory]
+        [InlineData(BreakEvenResult.AlreadyAtBreakEven, "Break-even already applied")]
+        [InlineData(BreakEvenResult.NoActiveTrade, "No active trade to move")]
+        [InlineData(BreakEvenResult.NoWorkingStop, "Stop order not yet working — retry in a moment")]
+        public void BreakEvenCommand_surfaces_rejection_reasons_in_status(
+            BreakEvenResult result, string expectedMessage)
+        {
+            _vm.ManualBreakEvenRequested = () => result;
+            SetupValidPlan();
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            _sm.TransitionTo(TradeState.Active);
+
+            _vm.BreakEvenCommand.Execute(null);
+            Assert.Equal(expectedMessage, _vm.StatusMessage);
+            Assert.Equal(expectedMessage, TradePlannerViewModel.DescribeBreakEvenResult(result));
+        }
+
+        [Fact]
+        public void BreakEvenCommand_Moved_leaves_status_to_the_monitor_and_state_flow()
+        {
+            _vm.ManualBreakEvenRequested = () => BreakEvenResult.Moved;
+            SetupValidPlan();
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            _sm.TransitionTo(TradeState.Active);
+            string statusBefore = _vm.StatusMessage;
+
+            _vm.BreakEvenCommand.Execute(null);
+            Assert.Equal(statusBefore, _vm.StatusMessage); // no rejection message injected
+        }
+
+        // ── Auto BE checkbox ────────────────────────────────────────────────
+
+        [Fact]
+        public void AutoBreakEven_defaults_true_matching_default_be_rr()
+        {
+            Assert.True(_vm.AutoBreakEven);
+            Assert.Equal(1.0, _vm.BreakEvenRr);
+            Assert.Equal(1.0, _controller.Config.BreakEvenRr);
+        }
+
+        [Fact]
+        public void Unchecking_AutoBreakEven_zeroes_be_rr_in_controller()
+        {
+            _vm.AutoBreakEven = false;
+
+            Assert.False(_vm.AutoBreakEven);
+            Assert.Equal(0, _vm.BreakEvenRr);
+            Assert.Equal(0, _controller.Config.BreakEvenRr);
+        }
+
+        [Fact]
+        public void Rechecking_AutoBreakEven_restores_default_rr_only_when_zero()
+        {
+            _vm.AutoBreakEven = false;
+            _vm.AutoBreakEven = true;
+            Assert.Equal(1.0, _vm.BreakEvenRr);
+
+            _vm.BreakEvenRr = 2.5;
+            _vm.AutoBreakEven = false;
+            _vm.AutoBreakEven = true;
+            Assert.Equal(1.0, _vm.BreakEvenRr); // restored from 0, custom value was already cleared
+
+            _vm.BreakEvenRr = 2.5;
+            _vm.AutoBreakEven = true; // already checked with a custom RR — untouched
+            Assert.Equal(2.5, _vm.BreakEvenRr);
+        }
+
+        [Fact]
+        public void Typing_zero_into_be_rr_unchecks_AutoBreakEven_and_positive_checks_it()
+        {
+            Assert.True(_vm.AutoBreakEven);
+
+            _vm.BreakEvenRr = 0;
+            Assert.False(_vm.AutoBreakEven);
+
+            _vm.BreakEvenRr = 1.5;
+            Assert.True(_vm.AutoBreakEven);
         }
 
         [Fact]

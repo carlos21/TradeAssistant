@@ -59,7 +59,7 @@ namespace TradeAssistant.Tests.Application
             Assert.Equal(0, _sut.TriggerPrice);
 
             ToActive();
-            Assert.True(_sut.MoveToBreakEven()); // manual still works
+            Assert.Equal(BreakEvenResult.Moved, _sut.MoveToBreakEven()); // manual still works
             Assert.Equal(20000, Assert.Single(_gateway.StopMoves));
         }
 
@@ -110,41 +110,41 @@ namespace TradeAssistant.Tests.Application
         }
 
         [Fact]
-        public void Manual_move_requires_activation()
+        public void Manual_move_without_activation_returns_NoWorkingStop()
         {
             ToActive();
-            Assert.False(_sut.MoveToBreakEven()); // never activated
+            Assert.Equal(BreakEvenResult.NoWorkingStop, _sut.MoveToBreakEven()); // never activated
             Assert.Empty(_gateway.StopMoves);
         }
 
         [Fact]
-        public void Manual_move_fails_when_not_active()
+        public void Manual_move_when_not_active_returns_NoActiveTrade()
         {
             _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
             Assert.Equal(TradeState.Idle, _sm.Current);
 
-            Assert.False(_sut.MoveToBreakEven());
+            Assert.Equal(BreakEvenResult.NoActiveTrade, _sut.MoveToBreakEven());
         }
 
         [Fact]
-        public void Manual_move_fails_when_already_triggered()
+        public void Manual_move_when_already_triggered_returns_AlreadyAtBreakEven()
         {
             ToActive();
             _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
 
-            Assert.True(_sut.MoveToBreakEven());
-            Assert.False(_sut.MoveToBreakEven());
+            Assert.Equal(BreakEvenResult.Moved, _sut.MoveToBreakEven());
+            Assert.Equal(BreakEvenResult.AlreadyAtBreakEven, _sut.MoveToBreakEven());
             Assert.Single(_gateway.StopMoves);
         }
 
         [Fact]
-        public void Gateway_throw_reports_error_and_returns_false()
+        public void Gateway_throw_reports_error_and_returns_NoWorkingStop()
         {
             ToActive();
             _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
             _gateway.ThrowOnMoveStopTo = true;
 
-            Assert.False(_sut.MoveToBreakEven());
+            Assert.Equal(BreakEvenResult.NoWorkingStop, _sut.MoveToBreakEven());
 
             Assert.Equal("Break-even failed: move boom", Assert.Single(_errors));
             Assert.False(_sut.IsTriggered);
@@ -173,7 +173,7 @@ namespace TradeAssistant.Tests.Application
 
             ToActive();
             _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
-            Assert.True(_sut.MoveToBreakEven());
+            Assert.Equal(BreakEvenResult.Moved, _sut.MoveToBreakEven());
 
             Assert.Empty(_gateway.StopMoves);
             Assert.Single(fresh.StopMoves);

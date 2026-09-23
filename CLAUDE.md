@@ -83,7 +83,7 @@ WPF panel embedded in the chart, strict MVVM. No trading logic in views or code-
 - `TradePlannerView` — **two surfaces must stay in sync**: code-built `BuildLayout()` in `TradePlannerView.xaml.cs` (primary, on chart) and `TradePlannerView.xaml` markup
 
 ### Indicator (`/src/TradeAssistantIndicator.cs`)
-Thin composition root: wires layers, translates chart mouse/keyboard events into controller calls, renders zones/labels allocation-free. Hotkeys: **SPACE** execute bracket, **B** manual break-even, **ESC** reset. SL adjusts via drag or the ▲▼ panel buttons (±5 pts) — ↑/↓ keep NT8 default chart scrolling.
+Thin composition root: wires layers, translates chart mouse/keyboard events into controller calls, renders zones/labels allocation-free. Hotkeys: **B** manual break-even. SL adjusts via drag or the ▲▼ panel buttons (±5 pts) — ↑/↓ keep NT8 default chart scrolling. Execution is triggered from the panel's EXECUTE button.
 
 ## Key Behavioral Rules
 
@@ -93,7 +93,7 @@ Thin composition root: wires layers, translates chart mouse/keyboard events into
 
 **Chart interactivity:** Only the SL line is draggable. Dragging SL → distance snapped to a multiple of 5 pts → TP re-derived from configured RR. TP is never draggable.
 
-**Spacebar bracket execution sequence (no ATM):**
+**Bracket execution sequence (no ATM), triggered by the panel EXECUTE button:**
 1. Validate `TradePlan.IsValid` and `Contracts >= 1`
 2. Submit market entry (unmanaged, name `"Entry"`)
 3. On entry fill: SL = fill ∓ snapped SL distance, TP = fill ± distance × RR (both tick-snapped)

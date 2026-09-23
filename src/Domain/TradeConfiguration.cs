@@ -64,6 +64,6 @@ namespace TradeAssistant.Domain
         }
 
         public static TradeConfiguration Default =>
-            new TradeConfiguration(RiskMode.FixedAmount, 240.0, 4.0, 1.0);
+            new TradeConfiguration(RiskMode.FixedAmount, 120.0, 4.0, 1.0);
     }
 }

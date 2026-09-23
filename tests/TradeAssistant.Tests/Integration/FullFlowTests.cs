@@ -113,6 +113,71 @@ namespace TradeAssistant.Tests.Integration
         }
 
         [Fact]
+        public void Bracket_submit_failure_still_activates_break_even_monitor_so_manual_be_works()
+        {
+            _sm.TransitionTo(TradeState.Planning);
+            _controller.SetEntryPrice(20000);
+            _controller.PlaceDefaultStop();
+
+            TradePlan plan = null;
+            _controller.PlanUpdated += p => plan = p;
+            _controller.Recalculate();
+            Assert.True(plan.IsValid);
+
+            _coordinator.Execute(plan);
+            _gateway.ThrowOnSubmitBracket = true; // bracket submission blows up after the fill
+            _gateway.FireEntryFilled(20001.25);
+
+            Assert.Equal(TradeState.Active, _sm.Current);
+            Assert.Empty(_gateway.Brackets);
+
+            // The monitor was activated via BracketPlaced despite the failure:
+            // armed for auto BE AND manual BE works for the open position.
+            Assert.True(_monitor.IsArmed);
+            Assert.Equal(20021.25, _monitor.TriggerPrice);
+            Assert.Equal(BreakEvenResult.Moved, _monitor.MoveToBreakEven());
+            Assert.Equal(20001.25, Assert.Single(_gateway.StopMoves));
+            Assert.Equal(TradeState.BreakEvenTriggered, _sm.Current);
+        }
+
+        [Fact]
+        public void Auto_be_disabled_by_zero_rr_skips_auto_trigger_but_manual_be_still_works()
+        {
+            // Local wiring with a zero BreakEvenRr config (what the VM produces
+            // when Auto BE is unchecked) — the shared _monitor would otherwise
+            // also react to the price feed.
+            var gateway = new FakeOrderGateway();
+            var feed = new FakePriceFeed();
+            var noAutoConfig = new TradeConfiguration(RiskMode.FixedAmount, 800, 4.0, 0.0);
+            var coordinator = new BracketExecutionCoordinator(gateway, _sm, _instrument);
+            var monitor = new BreakEvenMonitor(feed, gateway, _sm);
+            coordinator.BracketPlaced += b =>
+                monitor.Activate(b.FillPrice, b.StopPrice, noAutoConfig.BreakEvenRr, b.Direction);
+
+            _sm.TransitionTo(TradeState.Planning);
+            _controller.SetEntryPrice(20000);
+            _controller.PlaceDefaultStop();
+
+            TradePlan plan = null;
+            _controller.PlanUpdated += p => plan = p;
+            _controller.Recalculate();
+
+            coordinator.Execute(plan);
+            gateway.FireEntryFilled(20000);
+
+            Assert.Equal(TradeState.Active, _sm.Current);
+            Assert.False(monitor.IsArmed); // auto BE disabled by BreakEvenRr = 0
+
+            feed.SetPrice(20100); // would have crossed any trigger — nothing happens
+            Assert.Empty(gateway.StopMoves);
+
+            Assert.Equal(BreakEvenResult.Moved, monitor.MoveToBreakEven()); // manual still works
+            Assert.Equal(20000, Assert.Single(gateway.StopMoves));
+            monitor.Dispose();
+            coordinator.Dispose();
+        }
+
+        [Fact]
         public void Keyboard_flow_nudges_sl_by_exactly_one_step_and_tp_tracks_rr()
         {
             _sm.TransitionTo(TradeState.Planning);

@@ -99,11 +99,11 @@ namespace TradeAssistant.UI
             // Risk value input (label changes based on RiskMode)
             root.Children.Add(MakeDynamicInputRow("RiskValueLabel", "RiskValue", "{0:F2}"));
             root.Children.Add(MakeInputRow("R:R Ratio",    "RrRatio",          "{0:F1}"));
-            root.Children.Add(MakeInputRow("BE at R:R",    "BreakEvenRr",      "{0:F1}"));
+            root.Children.Add(MakeBreakEvenRow());
             root.Children.Add(MakeCheckboxRow("Show Boxes", "ShowTradeBoxes"));
             root.Children.Add(MakeSeparator());
 
-            // SL adjuster: ▼ / SL points / ▲ (±5 pts per click)
+            // SL adjuster: ▼ / ▲ buttons (±5 pts per click) with SL readout below
             root.Children.Add(MakeSlAdjusterRow());
             root.Children.Add(MakeSeparator());
 
@@ -122,7 +122,7 @@ namespace TradeAssistant.UI
                 Margin       = new Thickness(0, 8, 0, 8),
                 Child = new TextBlock
                 {
-                    Text                = "ARMED — Press SPACE to Execute",
+                    Text                = "ARMED — Click Execute",
                     FontWeight          = FontWeights.Bold,
                     Foreground          = Brushes.Black,
                     HorizontalAlignment = HorizontalAlignment.Center,
@@ -178,7 +178,7 @@ namespace TradeAssistant.UI
             // Hotkey hints
             root.Children.Add(new TextBlock
             {
-                Text                = "SPACE: Execute | B: Break-even | ESC: Reset",
+                Text                = "B: Break-even",
                 Foreground          = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
                 FontSize            = 10,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -227,6 +227,62 @@ namespace TradeAssistant.UI
             tb.PreviewKeyDown += NumericTextBoxPreviewKeyDown;
             Grid.SetColumn(tb, 1);
             grid.Children.Add(tb);
+
+            return grid;
+        }
+
+        private static UIElement MakeBreakEvenRow()
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var lbl = new TextBlock
+            {
+                Text              = "BE at R:R",
+                Foreground        = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize          = 12
+            };
+            Grid.SetColumn(lbl, 0);
+            grid.Children.Add(lbl);
+
+            var tb = new TextBox
+            {
+                Background               = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D)),
+                Foreground               = Brushes.White,
+                BorderBrush              = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+                BorderThickness          = new Thickness(1),
+                Padding                  = new Thickness(4, 2, 4, 2),
+                Height                   = 24,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                FontSize                 = 12
+            };
+            tb.SetBinding(TextBox.TextProperty,
+                new Binding("BreakEvenRr")
+                {
+                    UpdateSourceTrigger = UpdateSourceTrigger.LostFocus,
+                    StringFormat        = "{0:F1}"
+                });
+            tb.PreviewKeyDown += NumericTextBoxPreviewKeyDown;
+            Grid.SetColumn(tb, 1);
+            grid.Children.Add(tb);
+
+            var autoBe = new CheckBox
+            {
+                Content           = "Auto BE",
+                Foreground        = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin            = new Thickness(8, 0, 0, 0)
+            };
+            autoBe.SetBinding(CheckBox.IsCheckedProperty,
+                new Binding("AutoBreakEven")
+                {
+                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
+                });
+            Grid.SetColumn(autoBe, 2);
+            grid.Children.Add(autoBe);
 
             return grid;
         }
@@ -397,30 +453,39 @@ namespace TradeAssistant.UI
             };
 
             var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition());
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition());
+            grid.RowDefinitions.Add(new RowDefinition());
+
+            var buttons = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+            buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var downBtn = MakeNudgeButton("▼", "NudgeDownCommand", "Tighter SL (-5 pts)");
             Grid.SetColumn(downBtn, 0);
-            grid.Children.Add(downBtn);
-
-            var label = new TextBlock
-            {
-                FontWeight          = FontWeights.SemiBold,
-                Foreground          = Brushes.White,
-                FontSize            = 14,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment   = VerticalAlignment.Center
-            };
-            label.SetBinding(TextBlock.TextProperty,
-                new Binding("SlPoints") { StringFormat = "SL: {0:F0} points" });
-            Grid.SetColumn(label, 1);
-            grid.Children.Add(label);
+            buttons.Children.Add(downBtn);
 
             var upBtn = MakeNudgeButton("▲", "NudgeUpCommand", "Wider SL (+5 pts)");
             Grid.SetColumn(upBtn, 2);
-            grid.Children.Add(upBtn);
+            buttons.Children.Add(upBtn);
+
+            Grid.SetRow(buttons, 0);
+            grid.Children.Add(buttons);
+
+            var readout = new TextBlock
+            {
+                Foreground          = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                FontSize            = 10,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin              = new Thickness(0, 3, 0, 0)
+            };
+            readout.SetBinding(TextBlock.TextProperty,
+                new Binding("SlPoints") { StringFormat = "SL: {0:F0} pts" });
+            Grid.SetRow(readout, 1);
+            grid.Children.Add(readout);
 
             border.Child = grid;
             return border;
@@ -433,9 +498,9 @@ namespace TradeAssistant.UI
                 Content         = content,
                 Background      = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
                 Foreground      = Brushes.White,
-                FontSize        = 12,
-                Width           = 30,
-                Height          = 26,
+                FontSize        = 10,
+                Width           = 20,
+                Height          = 20,
                 BorderThickness = new Thickness(0),
                 Cursor          = System.Windows.Input.Cursors.Hand,
                 ToolTip         = tooltip

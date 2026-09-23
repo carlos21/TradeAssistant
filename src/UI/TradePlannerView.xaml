@@ -112,34 +112,41 @@
 
         <Separator Background="#333" Margin="0,0,0,10"/>
 
-        <!-- SL Points adjuster (▼/▲ buttons, ±5 points per click) -->
+        <!-- SL Points adjuster (▼/▲ buttons, ±5 points per click, readout below) -->
         <Border Background="#2D2D2D" BorderBrush="#555" BorderThickness="1" CornerRadius="4" Margin="0,0,0,10" Padding="8">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
 
-                <Button Grid.Column="0"
-                        Content="▼"
-                        Command="{Binding NudgeDownCommand}"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Width="30" Height="26" FontWeight="Normal"
-                        ToolTip="Tighter SL (-5 pts)"/>
+                <Grid Grid.Row="0" HorizontalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="4"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="1"
-                           Text="{Binding SlPoints, StringFormat=SL: {0:F0} points}"
-                           Style="{StaticResource ValueStyle}"
-                           FontSize="14"
-                           HorizontalAlignment="Center"/>
+                    <Button Grid.Column="0"
+                            Content="▼"
+                            Command="{Binding NudgeDownCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Width="20" Height="20" FontSize="10" FontWeight="Normal"
+                            ToolTip="Tighter SL (-5 pts)"/>
 
-                <Button Grid.Column="2"
-                        Content="▲"
-                        Command="{Binding NudgeUpCommand}"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Width="30" Height="26" FontWeight="Normal"
-                        ToolTip="Wider SL (+5 pts)"/>
+                    <Button Grid.Column="2"
+                            Content="▲"
+                            Command="{Binding NudgeUpCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Width="20" Height="20" FontSize="10" FontWeight="Normal"
+                            ToolTip="Wider SL (+5 pts)"/>
+                </Grid>
+
+                <TextBlock Grid.Row="1"
+                           Text="{Binding SlPoints, StringFormat=SL: {0:F0} pts}"
+                           Foreground="#AAAAAA" FontSize="10"
+                           HorizontalAlignment="Center"
+                           Margin="0,3,0,0"/>
             </Grid>
         </Border>
 
@@ -170,10 +177,14 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="120"/>
                 <ColumnDefinition/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="BE at R:R" Style="{StaticResource LabelStyle}"/>
             <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
                        Text="{Binding BreakEvenRr, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F1}}"/>
+            <CheckBox  Grid.Column="2" Content="Auto BE" Foreground="#AAAAAA"
+                       VerticalAlignment="Center" Margin="8,0,0,0"
+                       IsChecked="{Binding AutoBreakEven, UpdateSourceTrigger=PropertyChanged}"/>
         </Grid>
 
         <Separator Background="#333" Margin="0,0,0,10"/>
@@ -213,7 +224,7 @@
         <!-- ARMED indicator -->
         <Border Background="#F57F17" CornerRadius="4" Padding="8,4" Margin="0,0,0,8"
                 Visibility="{Binding IsArmed, Converter={StaticResource BoolToVis}}">
-            <TextBlock Text="ARMED — Press SPACE to Execute"
+            <TextBlock Text="ARMED — Click Execute"
                        FontWeight="Bold" Foreground="Black"
                        HorizontalAlignment="Center"/>
         </Border>
@@ -237,7 +248,7 @@
                 Margin="0,6,0,0"/>
 
         <!-- Hotkey hints -->
-        <TextBlock Text="SPACE: Execute | B: Break-even | ESC: Reset"
+        <TextBlock Text="B: Break-even"
                    Foreground="#666" FontSize="10"
                    HorizontalAlignment="Center"
                    Margin="0,8,0,0"/>

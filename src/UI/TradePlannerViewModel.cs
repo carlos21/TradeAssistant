@@ -17,8 +17,8 @@ namespace TradeAssistant.UI
         private readonly Dispatcher             _dispatcher;
 
         // Wired by the indicator (account refresh + execution / break-even)
-        public Action ExecuteRequested         { get; set; }
-        public Action ManualBreakEvenRequested { get; set; }
+        public Action ExecuteRequested { get; set; }
+        public Func<BreakEvenResult> ManualBreakEvenRequested { get; set; }
 
         // ── Input properties ─────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ namespace TradeAssistant.UI
             }
         }
 
-        private double _riskValue = 240.0;
+        private double _riskValue = 120.0;
         public double RiskValue
         {
             get => _riskValue;
@@ -66,6 +66,39 @@ namespace TradeAssistant.UI
             {
                 SetProperty(ref _breakEvenRr, value);
                 _controller.SetBreakEvenRr(value);
+                // Typing 0 into "BE at R:R" unchecks Auto BE; any positive value checks it.
+                SetProperty(ref _autoBreakEven, value > 0, nameof(AutoBreakEven));
+            }
+        }
+
+        private bool _autoBreakEven = true;
+        public bool AutoBreakEven
+        {
+            get => _autoBreakEven;
+            set
+            {
+                if (_autoBreakEven == value) return;
+                SetProperty(ref _autoBreakEven, value);
+                if (!value)
+                {
+                    BreakEvenRr = 0;
+                }
+                else if (BreakEvenRr == 0)
+                {
+                    BreakEvenRr = 1.0;
+                }
+            }
+        }
+
+        /// <summary>Human-readable feedback for a rejected manual break-even attempt.</summary>
+        public static string DescribeBreakEvenResult(BreakEvenResult result)
+        {
+            switch (result)
+            {
+                case BreakEvenResult.AlreadyAtBreakEven: return "Break-even already applied";
+                case BreakEvenResult.NoActiveTrade:      return "No active trade to move";
+                case BreakEvenResult.NoWorkingStop:      return "Stop order not yet working — retry in a moment";
+                default:                                 return null; // Moved — the monitor reports success itself
             }
         }
 
@@ -234,7 +267,12 @@ namespace TradeAssistant.UI
             _breakEvenCommand = new RelayCommand(
                 () =>
                 {
-                    try { ManualBreakEvenRequested?.Invoke(); }
+                    try
+                    {
+                        BreakEvenResult result = ManualBreakEvenRequested?.Invoke() ?? BreakEvenResult.NoWorkingStop;
+                        string feedback = DescribeBreakEvenResult(result);
+                        if (feedback != null) StatusMessage = feedback;
+                    }
                     catch (Exception ex) { StatusMessage = $"Break-even error: {ex.Message}"; }
                 },
                 () => CanBreakEven);

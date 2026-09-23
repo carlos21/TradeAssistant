@@ -42,7 +42,7 @@ namespace TradeAssistant.Tests.Application
         public void Ctor_uses_default_config_when_none_given()
         {
             var c = new TradePlannerController(_instrument, _account);
-            Assert.Equal(240.0, c.Config.RiskValue);
+            Assert.Equal(120.0, c.Config.RiskValue);
         }
 
         [Fact]

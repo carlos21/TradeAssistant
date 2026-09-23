@@ -22,8 +22,8 @@ namespace NinjaTrader.NinjaScript.Indicators
     /// layers together and translates raw chart events into controller calls.
     /// All trading logic lives in the layers — none here.
     ///
-    /// Hotkeys: SPACE = execute bracket | B = break-even | ESC = reset.
-    /// SL distance adjusts via drag or the ▲/▼ panel buttons (±5 pts).
+    /// Hotkeys: B = break-even. SL distance adjusts via drag or the ▲/▼ panel
+    /// buttons (±5 pts).
     /// </summary>
     public class TradeAssistantIndicator : Indicator
     {
@@ -84,7 +84,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 DisplayInDataBox = false;
 
                 RiskMode        = RiskMode.FixedAmount;
-                RiskValue       = 240.0;
+                RiskValue       = 120.0;
                 RrRatio         = 4.0;
                 BreakEvenRr     = 1.0;
                 DefaultSlPoints = 20.0;
@@ -468,29 +468,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             switch (e.Key)
             {
-                case Key.Space:
-                    e.Handled = true;
-                    OnExecuteRequested();
-                    break;
-
                 case Key.B:
                     e.Handled = true;
-                    _breakEvenMonitor?.MoveToBreakEven();
-                    break;
-
-                case Key.Escape:
-                    e.Handled = true;
-                    _interaction?.CancelDrag();
-                    Mouse.Capture(null);
-                    if (ChartControl != null) ChartControl.Cursor = null;
-                    _breakEvenMonitor?.Deactivate();
-                    _stateMachine.Reset();
-                    _controller?.ClearStop();
-                    _stopPrice   = 0;
-                    _tpPrice     = 0;
-                    _currentPlan = TradePlan.Empty;
-                    _initialized = false;
-                    ForceRefresh();
+                    if (_breakEvenMonitor != null)
+                    {
+                        BreakEvenResult result = _breakEvenMonitor.MoveToBreakEven();
+                        string feedback = TradePlannerViewModel.DescribeBreakEvenResult(result);
+                        if (feedback != null && _viewModel != null)
+                            _viewModel.StatusMessage = feedback;
+                    }
                     break;
             }
         }
@@ -553,8 +539,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 // Trade finished (closed or cancelled) → return to planning
                 // automatically, keeping the last SL distance (the entry keeps
-                // following the live price). Esc resets use Planning→Idle via
-                // Reset(), so they are not affected by this branch.
+                // following the live price).
                 if ((previous == TradeState.Closed || previous == TradeState.Cancelled) &&
                     _controller != null && _stateMachine.Current == TradeState.Idle)
                 {
