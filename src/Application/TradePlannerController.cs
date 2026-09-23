@@ -164,7 +164,8 @@ namespace TradeAssistant.Application
             double riskAmount = RiskCalculator.Calculate(balance, _config.RiskMode, _config.RiskValue);
 
             var sizing = FuturesPositionSizer.Calculate(
-                _entryPrice, stopPrice, _instrument.TickSize, _instrument.TickValue, riskAmount);
+                _entryPrice, stopPrice, _instrument.TickSize, _instrument.TickValue, riskAmount,
+                TradeConfiguration.MinRiskDollars);
 
             if (sizing.error != null)
                 return TradePlan.Invalid(sizing.error);

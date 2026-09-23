@@ -20,6 +20,9 @@ namespace TradeAssistant.UI
         public Action ExecuteRequested { get; set; }
         public Func<BreakEvenResult> ManualBreakEvenRequested { get; set; }
 
+        /// <summary>Wired by the indicator to a MessageBox popup; receives (title, message).</summary>
+        public Action<string, string> ErrorDisplay { get; set; }
+
         // ── Input properties ─────────────────────────────────────────────────
 
         private RiskMode _riskMode = RiskMode.FixedAmount;
@@ -30,6 +33,10 @@ namespace TradeAssistant.UI
             {
                 SetProperty(ref _riskMode, value);
                 OnPropertyChanged(nameof(RiskValueLabel));
+                // Re-assigning the current (sub-minimum) value routes the bump through the
+                // RiskValue setter's clamp + popup before the mode switch validates.
+                if (value == RiskMode.FixedAmount && _riskValue < TradeConfiguration.MinRiskDollars)
+                    RiskValue = _riskValue;
                 _controller.SetRiskMode(value);
             }
         }
@@ -40,6 +47,12 @@ namespace TradeAssistant.UI
             get => _riskValue;
             set
             {
+                if (_riskMode == RiskMode.FixedAmount && value < TradeConfiguration.MinRiskDollars)
+                {
+                    value = TradeConfiguration.MinRiskDollars;
+                    ErrorDisplay?.Invoke("Invalid Risk",
+                        $"Risk $ cannot be less than {TradeConfiguration.MinRiskDollars:F0} USD — set to {TradeConfiguration.MinRiskDollars:F0}.");
+                }
                 SetProperty(ref _riskValue, value);
                 _controller.SetRiskValue(value);
             }
@@ -241,7 +254,11 @@ namespace TradeAssistant.UI
                 () =>
                 {
                     try { ExecuteRequested?.Invoke(); }
-                    catch (Exception ex) { StatusMessage = $"Execute error: {ex.Message}"; }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"Execute error: {ex.Message}";
+                        ErrorDisplay?.Invoke("Execute Error", ex.Message);
+                    }
                 },
                 () => CanExecuteTrade && _stateMachine.Current == TradeState.Planning);
 
@@ -271,9 +288,17 @@ namespace TradeAssistant.UI
                     {
                         BreakEvenResult result = ManualBreakEvenRequested?.Invoke() ?? BreakEvenResult.NoWorkingStop;
                         string feedback = DescribeBreakEvenResult(result);
-                        if (feedback != null) StatusMessage = feedback;
+                        if (feedback != null)
+                        {
+                            StatusMessage = feedback;
+                            ErrorDisplay?.Invoke("Break-even Unavailable", feedback);
+                        }
                     }
-                    catch (Exception ex) { StatusMessage = $"Break-even error: {ex.Message}"; }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"Break-even error: {ex.Message}";
+                        ErrorDisplay?.Invoke("Break-even Error", ex.Message);
+                    }
                 },
                 () => CanBreakEven);
 
@@ -287,7 +312,11 @@ namespace TradeAssistant.UI
         private void SafeNudge(int steps)
         {
             try { _controller.NudgeStop(steps); }
-            catch (Exception ex) { StatusMessage = $"Nudge error: {ex.Message}"; }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Nudge error: {ex.Message}";
+                ErrorDisplay?.Invoke("Nudge Error", ex.Message);
+            }
         }
 
         private void RunOnUI(Action action)

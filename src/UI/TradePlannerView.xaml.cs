@@ -103,7 +103,7 @@ namespace TradeAssistant.UI
             root.Children.Add(MakeCheckboxRow("Show Boxes", "ShowTradeBoxes"));
             root.Children.Add(MakeSeparator());
 
-            // SL adjuster: ▼ / ▲ buttons (±5 pts per click) with SL readout below
+            // SL adjuster: ▼ / ▲ buttons (±5 pts per click)
             root.Children.Add(MakeSlAdjusterRow());
             root.Children.Add(MakeSeparator());
 
@@ -174,16 +174,6 @@ namespace TradeAssistant.UI
             };
             beBtn.SetBinding(Button.CommandProperty, new Binding("BreakEvenCommand"));
             root.Children.Add(beBtn);
-
-            // Hotkey hints
-            root.Children.Add(new TextBlock
-            {
-                Text                = "B: Break-even",
-                Foreground          = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
-                FontSize            = 10,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin              = new Thickness(0, 8, 0, 0)
-            });
 
             return root;
         }
@@ -452,10 +442,6 @@ namespace TradeAssistant.UI
                 Margin        = new Thickness(0, 0, 0, 5)
             };
 
-            var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition());
-            grid.RowDefinitions.Add(new RowDefinition());
-
             var buttons = new Grid
             {
                 HorizontalAlignment = HorizontalAlignment.Center
@@ -472,22 +458,7 @@ namespace TradeAssistant.UI
             Grid.SetColumn(upBtn, 2);
             buttons.Children.Add(upBtn);
 
-            Grid.SetRow(buttons, 0);
-            grid.Children.Add(buttons);
-
-            var readout = new TextBlock
-            {
-                Foreground          = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
-                FontSize            = 10,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin              = new Thickness(0, 3, 0, 0)
-            };
-            readout.SetBinding(TextBlock.TextProperty,
-                new Binding("SlPoints") { StringFormat = "SL: {0:F0} pts" });
-            Grid.SetRow(readout, 1);
-            grid.Children.Add(readout);
-
-            border.Child = grid;
+            border.Child = buttons;
             return border;
         }
 
@@ -495,15 +466,18 @@ namespace TradeAssistant.UI
         {
             var btn = new Button
             {
-                Content         = content,
-                Background      = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
-                Foreground      = Brushes.White,
-                FontSize        = 10,
-                Width           = 20,
-                Height          = 20,
-                BorderThickness = new Thickness(0),
-                Cursor          = System.Windows.Input.Cursors.Hand,
-                ToolTip         = tooltip
+                Content                    = content,
+                Background                 = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
+                Foreground                 = Brushes.White,
+                FontSize                   = 9,
+                Width                      = 16,
+                Height                     = 16,
+                Padding                    = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment   = VerticalAlignment.Center,
+                BorderThickness            = new Thickness(0),
+                Cursor                     = System.Windows.Input.Cursors.Hand,
+                ToolTip                    = tooltip
             };
             btn.SetBinding(Button.CommandProperty, new Binding(commandBinding));
             return btn;

@@ -72,6 +72,47 @@ namespace TradeAssistant.Tests.UI
         }
 
         [Fact]
+        public void RiskValue_below_minimum_is_clamped_and_pops_up()
+        {
+            var errors = new List<(string title, string message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+
+            _vm.RiskValue = 50;
+
+            Assert.Equal(100.0, _vm.RiskValue);
+            Assert.Equal(100.0, _controller.Config.RiskValue);
+            Assert.Single(errors);
+        }
+
+        [Fact]
+        public void RiskValue_at_or_above_minimum_is_untouched()
+        {
+            var errors = new List<(string title, string message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+
+            _vm.RiskValue = 150;
+
+            Assert.Equal(150.0, _vm.RiskValue);
+            Assert.Empty(errors);
+        }
+
+        [Fact]
+        public void Switching_to_fixed_amount_clamps_sub_minimum_percentage_value()
+        {
+            var errors = new List<(string title, string message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+
+            _vm.RiskMode  = RiskMode.Percentage;
+            _vm.RiskValue = 1.0; // 1% — fine in percentage mode
+
+            _vm.RiskMode = RiskMode.FixedAmount;
+
+            Assert.Equal(100.0, _vm.RiskValue);
+            Assert.Equal(100.0, _controller.Config.RiskValue);
+            Assert.Single(errors);
+        }
+
+        [Fact]
         public void RiskMode_change_raises_label_property_changed()
         {
             var raised = new List<string>();
@@ -212,13 +253,16 @@ namespace TradeAssistant.Tests.UI
         }
 
         [Fact]
-        public void ExecuteCommand_catches_handler_exceptions_into_status()
+        public void ExecuteCommand_catches_handler_exceptions_into_status_and_popup()
         {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
             _vm.ExecuteRequested = () => throw new InvalidOperationException("kaput");
             SetupValidPlan();
 
             _vm.ExecuteCommand.Execute(null);
             Assert.Equal("Execute error: kaput", _vm.StatusMessage);
+            Assert.Equal(("Execute Error", "kaput"), Assert.Single(errors));
         }
 
         [Fact]
@@ -280,8 +324,10 @@ namespace TradeAssistant.Tests.UI
         }
 
         [Fact]
-        public void BreakEvenCommand_catches_handler_exceptions_into_status()
+        public void BreakEvenCommand_catches_handler_exceptions_into_status_and_popup()
         {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
             _vm.ManualBreakEvenRequested = () => throw new InvalidOperationException("nope");
             SetupValidPlan();
             _sm.TransitionTo(TradeState.Armed);
@@ -290,15 +336,18 @@ namespace TradeAssistant.Tests.UI
 
             _vm.BreakEvenCommand.Execute(null);
             Assert.Equal("Break-even error: nope", _vm.StatusMessage);
+            Assert.Equal(("Break-even Error", "nope"), Assert.Single(errors));
         }
 
         [Theory]
         [InlineData(BreakEvenResult.AlreadyAtBreakEven, "Break-even already applied")]
         [InlineData(BreakEvenResult.NoActiveTrade, "No active trade to move")]
         [InlineData(BreakEvenResult.NoWorkingStop, "Stop order not yet working — retry in a moment")]
-        public void BreakEvenCommand_surfaces_rejection_reasons_in_status(
+        public void BreakEvenCommand_surfaces_rejection_reasons_in_status_and_popup(
             BreakEvenResult result, string expectedMessage)
         {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
             _vm.ManualBreakEvenRequested = () => result;
             SetupValidPlan();
             _sm.TransitionTo(TradeState.Armed);
@@ -308,11 +357,14 @@ namespace TradeAssistant.Tests.UI
             _vm.BreakEvenCommand.Execute(null);
             Assert.Equal(expectedMessage, _vm.StatusMessage);
             Assert.Equal(expectedMessage, TradePlannerViewModel.DescribeBreakEvenResult(result));
+            Assert.Equal(("Break-even Unavailable", expectedMessage), Assert.Single(errors));
         }
 
         [Fact]
         public void BreakEvenCommand_Moved_leaves_status_to_the_monitor_and_state_flow()
         {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
             _vm.ManualBreakEvenRequested = () => BreakEvenResult.Moved;
             SetupValidPlan();
             _sm.TransitionTo(TradeState.Armed);
@@ -322,6 +374,7 @@ namespace TradeAssistant.Tests.UI
 
             _vm.BreakEvenCommand.Execute(null);
             Assert.Equal(statusBefore, _vm.StatusMessage); // no rejection message injected
+            Assert.Empty(errors);                          // no popup on success
         }
 
         // ── Auto BE checkbox ────────────────────────────────────────────────

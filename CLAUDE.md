@@ -60,6 +60,8 @@ Pure C# logic with zero NinjaTrader references. All classes here must be unit-te
 StopDistanceTicks = |Entry - Stop| / TickSize
 RiskPerContract   = StopDistanceTicks × TickValue
 Contracts         = floor(RiskAmount / RiskPerContract)   // integer, >= 1
+Min-risk rule     = if Contracts >= 1 and realized risk < $100 (TradeConfiguration.MinRiskDollars),
+                    add 1 contract; if Contracts == 0 but one contract risks >= $100, take 1.
 ```
 
 ### Application Layer (`/src/Application`)
@@ -89,7 +91,7 @@ Thin composition root: wires layers, translates chart mouse/keyboard events into
 
 **Instrument values:** Always read from `Instrument.MasterInstrument.TickSize`, `.TickValue`, `.PointValue`. Never hardcode NQ/MNQ/ES/MES tick sizes.
 
-**Contracts:** Always `int`, always `>= 1`. Use `Math.Floor`. Guard against zero (account too small / stop too tight).
+**Contracts:** Always `int`, always `>= 1`. Use `Math.Floor`. Guard against zero (account too small / stop too tight). Realized risk (contracts × risk-per-contract) must never fall below `TradeConfiguration.MinRiskDollars` ($100) — the sizer adds one contract, or rescues a 0-contract result to 1 contract, to honor the floor.
 
 **Chart interactivity:** Only the SL line is draggable. Dragging SL → distance snapped to a multiple of 5 pts → TP re-derived from configured RR. TP is never draggable.
 

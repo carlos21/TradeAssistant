@@ -112,41 +112,34 @@
 
         <Separator Background="#333" Margin="0,0,0,10"/>
 
-        <!-- SL Points adjuster (▼/▲ buttons, ±5 points per click, readout below) -->
+        <!-- SL Points adjuster (▼/▲ buttons, ±5 points per click) -->
         <Border Background="#2D2D2D" BorderBrush="#555" BorderThickness="1" CornerRadius="4" Margin="0,0,0,10" Padding="8">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition/>
-                    <RowDefinition/>
-                </Grid.RowDefinitions>
+            <Grid HorizontalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="4"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-                <Grid Grid.Row="0" HorizontalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="4"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
+                <Button Grid.Column="0"
+                        Content="▼"
+                        Command="{Binding NudgeDownCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Width="16" Height="16" FontSize="9" FontWeight="Normal"
+                        Padding="0"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip="Tighter SL (-5 pts)"/>
 
-                    <Button Grid.Column="0"
-                            Content="▼"
-                            Command="{Binding NudgeDownCommand}"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            Width="20" Height="20" FontSize="10" FontWeight="Normal"
-                            ToolTip="Tighter SL (-5 pts)"/>
-
-                    <Button Grid.Column="2"
-                            Content="▲"
-                            Command="{Binding NudgeUpCommand}"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            Width="20" Height="20" FontSize="10" FontWeight="Normal"
-                            ToolTip="Wider SL (+5 pts)"/>
-                </Grid>
-
-                <TextBlock Grid.Row="1"
-                           Text="{Binding SlPoints, StringFormat=SL: {0:F0} pts}"
-                           Foreground="#AAAAAA" FontSize="10"
-                           HorizontalAlignment="Center"
-                           Margin="0,3,0,0"/>
+                <Button Grid.Column="2"
+                        Content="▲"
+                        Command="{Binding NudgeUpCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Width="16" Height="16" FontSize="9" FontWeight="Normal"
+                        Padding="0"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip="Wider SL (+5 pts)"/>
             </Grid>
         </Border>
 
@@ -246,12 +239,6 @@
                 Command="{Binding BreakEvenCommand}"
                 Style="{StaticResource SecondaryButtonStyle}"
                 Margin="0,6,0,0"/>
-
-        <!-- Hotkey hints -->
-        <TextBlock Text="B: Break-even"
-                   Foreground="#666" FontSize="10"
-                   HorizontalAlignment="Center"
-                   Margin="0,8,0,0"/>
 
     </StackPanel>
 </Window>

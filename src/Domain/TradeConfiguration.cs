@@ -7,6 +7,9 @@ namespace TradeAssistant.Domain
     /// </summary>
     public sealed class TradeConfiguration
     {
+        /// <summary>Minimum risk in account currency when RiskMode is FixedAmount.</summary>
+        public const double MinRiskDollars = 100.0;
+
         public RiskMode RiskMode        { get; }
         public double   RiskValue       { get; }
         public double   RrRatio         { get; }
@@ -30,6 +33,9 @@ namespace TradeAssistant.Domain
         {
             if (riskValue <= 0)
                 throw new ArgumentException("Risk value must be positive.", nameof(riskValue));
+            if (riskMode == RiskMode.FixedAmount && riskValue < MinRiskDollars)
+                throw new ArgumentException(
+                    $"Fixed-amount risk cannot be less than {MinRiskDollars:F0}.", nameof(riskValue));
             if (rrRatio <= 0)
                 throw new ArgumentException("RR ratio must be positive.", nameof(rrRatio));
             if (breakEvenRr < 0)

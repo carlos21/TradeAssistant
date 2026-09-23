@@ -82,6 +82,43 @@ namespace TradeAssistant.Tests.Application
         }
 
         [Fact]
+        public void Plan_adds_a_contract_when_rounding_would_realize_less_than_minimum_risk()
+        {
+            // 0.25-pt snapping so a 3.5-pt stop is reachable: 14 ticks → $70/contract.
+            // floor(120/70) = 1 → $70 realized < $100 minimum → bumped to 2 contracts.
+            var sut = new TradePlannerController(_instrument, _account,
+                new TradeConfiguration(RiskMode.FixedAmount, 120, 4.0, 1.0, slStepPoints: 0.25));
+            var plans = new List<TradePlan>();
+            sut.PlanUpdated += p => plans.Add(p);
+
+            sut.SetEntryPrice(20000);
+            sut.SetStopFromPrice(19996.5);
+
+            var plan = plans[^1];
+            Assert.True(plan.IsValid);
+            Assert.Equal(2, plan.Contracts);
+            Assert.True(plan.RiskDollars >= TradeConfiguration.MinRiskDollars);
+        }
+
+        [Fact]
+        public void Plan_takes_one_contract_when_only_one_exceeds_target_but_meets_minimum()
+        {
+            // 10-pt stop = 40 ticks → $200/contract. floor(120/200) = 0, but $200 >= $100.
+            var sut = new TradePlannerController(_instrument, _account,
+                new TradeConfiguration(RiskMode.FixedAmount, 120, 4.0, 1.0));
+            var plans = new List<TradePlan>();
+            sut.PlanUpdated += p => plans.Add(p);
+
+            sut.SetEntryPrice(20000);
+            sut.SetStopFromPrice(19990);
+
+            var plan = plans[^1];
+            Assert.True(plan.IsValid);
+            Assert.Equal(1, plan.Contracts);
+            Assert.True(plan.RiskDollars >= TradeConfiguration.MinRiskDollars);
+        }
+
+        [Fact]
         public void ReplaceAccountDataProvider_throws_on_null_and_swaps_source()
         {
             Assert.Throws<ArgumentNullException>(() => _sut.ReplaceAccountDataProvider(null));
@@ -266,15 +303,19 @@ namespace TradeAssistant.Tests.Application
         }
 
         [Fact]
-        public void Zero_contracts_yields_invalid_plan()
+        public void Zero_contracts_yields_invalid_plan_when_even_one_contract_is_below_minimum()
         {
+            // Percentage mode on a small balance: 0.8% of $5,000 = $40 target.
+            // 2.5-pt stop = 10 ticks → $50/contract: floor(40/50) = 0, and $50 < $100
+            // minimum → no rescue, so the plan stays invalid.
+            _account.AccountBalance = 5_000;
             var c = new TradePlannerController(_instrument, _account,
-                new TradeConfiguration(RiskMode.FixedAmount, 240, 4.0, 1.0)); // $240 < $400 needed
+                new TradeConfiguration(RiskMode.Percentage, 0.8, 4.0, 1.0, slStepPoints: 0.25));
             TradePlan plan = null;
             c.PlanUpdated += p => plan = p;
 
             c.SetEntryPrice(20000);
-            c.PlaceDefaultStop();
+            c.SetStopFromPrice(19997.5);
 
             Assert.False(plan.IsValid);
             Assert.Equal("0 contracts — risk amount too small for this stop distance.", plan.ValidationError);

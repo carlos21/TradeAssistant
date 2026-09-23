@@ -32,6 +32,52 @@ namespace TradeAssistant.Tests.Domain
             Assert.Null(r.error);
         }
 
+        // ── Min-risk floor (minRiskAmount) ────────────────────────────────────
+        // NQ numbers below: tick 0.25, tick value $5.
+
+        [Fact]
+        public void Adds_one_contract_when_floored_risk_is_below_minimum()
+        {
+            // riskPerContract = $70 (14 ticks): floor(120/70) = 1 → $70 < $100 → bump to 2.
+            var r = FuturesPositionSizer.Calculate(20000, 19996.5, 0.25, 5.0, 120, 100);
+            Assert.Null(r.error);
+            Assert.Equal(70.0, r.riskPerContract);
+            Assert.Equal(2, r.contracts);
+        }
+
+        [Fact]
+        public void No_bump_when_floored_risk_meets_minimum_exactly()
+        {
+            // riskPerContract = $50 (10 ticks): floor(120/50) = 2 → $100 exactly.
+            var r = FuturesPositionSizer.Calculate(20000, 19997.5, 0.25, 5.0, 120, 100);
+            Assert.Equal(2, r.contracts);
+        }
+
+        [Fact]
+        public void No_bump_when_floored_risk_exceeds_minimum()
+        {
+            // riskPerContract = $60 (12 ticks): floor(120/60) = 2 → $120.
+            var r = FuturesPositionSizer.Calculate(20000, 19997.0, 0.25, 5.0, 120, 100);
+            Assert.Equal(2, r.contracts);
+        }
+
+        [Fact]
+        public void Zero_contract_result_is_rescued_when_one_contract_meets_minimum()
+        {
+            // riskPerContract = $150 (30 ticks): floor(120/150) = 0, but $150 >= $100 → 1.
+            var r = FuturesPositionSizer.Calculate(20000, 19992.5, 0.25, 5.0, 120, 100);
+            Assert.Null(r.error);
+            Assert.Equal(150.0, r.riskPerContract);
+            Assert.Equal(1, r.contracts);
+        }
+
+        [Fact]
+        public void Zero_contract_result_without_minimum_stays_zero()
+        {
+            var r = FuturesPositionSizer.Calculate(20000, 19992.5, 0.25, 5.0, 120, 0);
+            Assert.Equal(0, r.contracts);
+        }
+
         [Fact]
         public void Works_for_short_direction_distances()
         {

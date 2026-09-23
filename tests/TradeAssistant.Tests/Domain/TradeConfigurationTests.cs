@@ -37,6 +37,29 @@ namespace TradeAssistant.Tests.Domain
         }
 
         [Theory]
+        [InlineData(99.0)]
+        [InlineData(50.0)]
+        public void Throws_when_fixed_amount_risk_below_minimum(double riskValue)
+        {
+            Assert.Throws<ArgumentException>(
+                () => new TradeConfiguration(RiskMode.FixedAmount, riskValue, 4.0, 1.0));
+        }
+
+        [Fact]
+        public void Fixed_amount_risk_at_minimum_is_allowed()
+        {
+            var c = new TradeConfiguration(RiskMode.FixedAmount, 100.0, 4.0, 1.0);
+            Assert.Equal(100.0, c.RiskValue);
+        }
+
+        [Fact]
+        public void Percentage_risk_has_no_dollar_floor()
+        {
+            var c = new TradeConfiguration(RiskMode.Percentage, 1.0, 4.0, 1.0);
+            Assert.Equal(1.0, c.RiskValue);
+        }
+
+        [Theory]
         [InlineData(0.0)]
         [InlineData(-2.0)]
         public void Throws_when_rr_not_positive(double rr)

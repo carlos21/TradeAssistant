@@ -155,7 +155,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private TradeConfiguration BuildConfig()
         {
-            return new TradeConfiguration(RiskMode, RiskValue, RrRatio, BreakEvenRr,
+            double riskValue = RiskMode == RiskMode.FixedAmount
+                ? Math.Max(TradeConfiguration.MinRiskDollars, RiskValue)
+                : RiskValue;
+            return new TradeConfiguration(RiskMode, riskValue, RrRatio, BreakEvenRr,
                 StopSnapper.DefaultStepPoints, DefaultSlPoints);
         }
 
@@ -204,6 +207,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                     _viewModel.ExecuteRequested         = OnExecuteRequested;
                     _viewModel.ManualBreakEvenRequested = () => _breakEvenMonitor.MoveToBreakEven();
+                    _viewModel.ErrorDisplay             = ShowError;
                     _viewModel.ShowTradeBoxesChanged   += show => ForceRefresh();
 
                     _panel = new TradePlannerView(_viewModel);
@@ -474,8 +478,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                     {
                         BreakEvenResult result = _breakEvenMonitor.MoveToBreakEven();
                         string feedback = TradePlannerViewModel.DescribeBreakEvenResult(result);
-                        if (feedback != null && _viewModel != null)
-                            _viewModel.StatusMessage = feedback;
+                        if (feedback != null)
+                        {
+                            ShowError("Break-even Unavailable", feedback);
+                            if (_viewModel != null)
+                                _viewModel.StatusMessage = feedback;
+                        }
                     }
                     break;
             }
@@ -491,7 +499,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 EnsureAccountCurrent();
 
-                if (_stateMachine.Current != TradeState.Planning) return;
+                if (_stateMachine.Current != TradeState.Planning)
+                {
+                    ShowError("Execute Unavailable",
+                        "Execute is only available when a trade plan is armed.");
+                    return;
+                }
 
                 if (!_currentPlan.IsValid)
                 {
