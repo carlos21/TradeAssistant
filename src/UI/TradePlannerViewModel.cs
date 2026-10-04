@@ -31,13 +31,12 @@ namespace TradeAssistant.UI
             get => _riskMode;
             set
             {
+                if (_riskMode == value) return;
                 SetProperty(ref _riskMode, value);
                 OnPropertyChanged(nameof(RiskValueLabel));
-                // Re-assigning the current (sub-minimum) value routes the bump through the
-                // RiskValue setter's clamp + popup before the mode switch validates.
-                if (value == RiskMode.FixedAmount && _riskValue < TradeConfiguration.MinRiskDollars)
-                    RiskValue = _riskValue;
-                _controller.SetRiskMode(value);
+                double modeDefault = value == RiskMode.Percentage ? 1.0 : 120.0;
+                SetProperty(ref _riskValue, modeDefault, nameof(RiskValue));
+                _controller.SetRiskModeAndValue(value, modeDefault);
             }
         }
 
@@ -71,7 +70,7 @@ namespace TradeAssistant.UI
             }
         }
 
-        private double _breakEvenRr = 1.0;
+        private double _breakEvenRr = 3.0;
         public double BreakEvenRr
         {
             get => _breakEvenRr;
@@ -98,7 +97,7 @@ namespace TradeAssistant.UI
                 }
                 else if (BreakEvenRr == 0)
                 {
-                    BreakEvenRr = 1.0;
+                    BreakEvenRr = 3.0;
                 }
             }
         }
@@ -189,7 +188,31 @@ namespace TradeAssistant.UI
             private set => SetProperty(ref _tpPrice, value);
         }
 
-        private string _statusMessage = "Drag SL line or use ▲▼ buttons to adjust (steps of 5 pts)";
+        private double _slStepPoints = StopSnapper.DefaultStepPoints;
+        public double SlStepPoints
+        {
+            get => _slStepPoints;
+            set
+            {
+                try
+                {
+                    _controller.SetSlStepPoints(value);
+                    SetProperty(ref _slStepPoints, _controller.Config.SlStepPoints);
+                    OnPropertyChanged(nameof(AdjustHint));
+                }
+                catch (Exception ex)
+                {
+                    ErrorDisplay?.Invoke("Invalid SL Step", ex.Message);
+                    SetProperty(ref _slStepPoints, _controller.Config.SlStepPoints, nameof(SlStepPoints));
+                }
+            }
+        }
+
+        /// <summary>Status hint shown while planning; reflects the configured SL step.</summary>
+        public string AdjustHint =>
+            $"Drag SL line or use ▲▼ buttons to adjust (steps of {SlStepPoints:0.##} pts)";
+
+        private string _statusMessage;
         public string StatusMessage
         {
             get => _statusMessage;
@@ -249,6 +272,7 @@ namespace TradeAssistant.UI
             _controller   = controller   ?? throw new ArgumentNullException(nameof(controller));
             _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
             _dispatcher   = Dispatcher.CurrentDispatcher;
+            _statusMessage = AdjustHint;
 
             _executeCommand = new RelayCommand(
                 () =>
@@ -366,7 +390,7 @@ namespace TradeAssistant.UI
                 switch (next)
                 {
                     case TradeState.Idle:
-                        StatusMessage   = "Drag SL line or use ▲▼ buttons to adjust (steps of 5 pts)";
+                        StatusMessage   = AdjustHint;
                         Contracts       = 0;
                         RiskDollars     = 0;
                         ProfitDollars   = 0;

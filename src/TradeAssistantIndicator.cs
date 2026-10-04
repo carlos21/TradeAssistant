@@ -2,7 +2,9 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using NinjaTrader.Cbi;
 using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript.Indicators;
@@ -23,7 +25,7 @@ namespace NinjaTrader.NinjaScript.Indicators
     /// All trading logic lives in the layers — none here.
     ///
     /// Hotkeys: B = break-even. SL distance adjusts via drag or the ▲/▼ panel
-    /// buttons (±5 pts).
+    /// buttons (±1 SL step).
     /// </summary>
     public class TradeAssistantIndicator : Indicator
     {
@@ -40,6 +42,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         private ChartScaleAxisConverter      _axis;
         private TradePlannerViewModel        _viewModel;
         private TradePlannerView             _panel;
+        private ChartTraderPanelHost         _panelHost;
+        private TabControl                   _tabControl;
+        private DateTime                     _lastAttachAttempt;
 
         // Cached handlers for clean unsubscribe
         private Action<string> _statusHandler;
@@ -57,7 +62,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private Account   _currentAccount;
 
         private const double HitTolerancePx = 12.0;
-        private const float  RectWidth      = 120f;
+        private const float  RectWidth      = 170f;
 
         // ── SharpDX resources ─────────────────────────────────────────────────
         private SharpDX.Direct2D1.SolidColorBrush _slZoneBrush;
@@ -86,7 +91,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 RiskMode        = RiskMode.FixedAmount;
                 RiskValue       = 120.0;
                 RrRatio         = 4.0;
-                BreakEvenRr     = 1.0;
+                BreakEvenRr     = 3.0;
+                SlStepPoints    = 5.0;
                 DefaultSlPoints = 20.0;
             }
             else if (State == State.DataLoaded)
@@ -126,7 +132,11 @@ namespace NinjaTrader.NinjaScript.Indicators
         public double BreakEvenRr { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Default SL Points", Order = 5, GroupName = "Risk")]
+        [Display(Name = "SL Step Points", Order = 5, GroupName = "Risk")]
+        public double SlStepPoints { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Default SL Points", Order = 6, GroupName = "Risk")]
         public double DefaultSlPoints { get; set; }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -159,7 +169,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ? Math.Max(TradeConfiguration.MinRiskDollars, RiskValue)
                 : RiskValue;
             return new TradeConfiguration(RiskMode, riskValue, RrRatio, BreakEvenRr,
-                StopSnapper.DefaultStepPoints, DefaultSlPoints);
+                SlStepPoints, DefaultSlPoints);
         }
 
         private void BuildServices(Account account)
@@ -200,35 +210,51 @@ namespace NinjaTrader.NinjaScript.Indicators
                 try
                 {
                     _viewModel = new TradePlannerViewModel(_controller, _stateMachine);
-                    _viewModel.RiskMode    = RiskMode;
-                    _viewModel.RiskValue   = RiskValue;
-                    _viewModel.RrRatio     = RrRatio;
-                    _viewModel.BreakEvenRr = BreakEvenRr;
+                    _viewModel.RiskMode     = RiskMode;
+                    _viewModel.RiskValue    = RiskValue;
+                    _viewModel.RrRatio      = RrRatio;
+                    _viewModel.BreakEvenRr  = BreakEvenRr;
+                    _viewModel.SlStepPoints = SlStepPoints;
 
                     _viewModel.ExecuteRequested         = OnExecuteRequested;
                     _viewModel.ManualBreakEvenRequested = () => _breakEvenMonitor.MoveToBreakEven();
                     _viewModel.ErrorDisplay             = ShowError;
                     _viewModel.ShowTradeBoxesChanged   += show => ForceRefresh();
 
-                    _panel = new TradePlannerView(_viewModel);
-
-                    if (ChartControl != null)
-                    {
-                        var chartGrid = ChartControl.Parent as System.Windows.Controls.Grid;
-                        if (chartGrid != null)
-                        {
-                            System.Windows.Controls.Grid.SetRowSpan(_panel,
-                                chartGrid.RowDefinitions.Count > 0 ? chartGrid.RowDefinitions.Count : 1);
-                            System.Windows.Controls.Grid.SetColumnSpan(_panel,
-                                chartGrid.ColumnDefinitions.Count > 0 ? chartGrid.ColumnDefinitions.Count : 1);
-                            System.Windows.Controls.Panel.SetZIndex(_panel, 100);
-                            chartGrid.Children.Add(_panel);
-                        }
-                    }
+                    _panel = new TradePlannerView(_viewModel, PanelHostMode.ChartTrader);
+                    _panelHost = new ChartTraderPanelHost();
+                    TryAttachPanel();
                 }
                 catch (Exception ex)
                 {
                     ShowError("Panel Error", $"Failed to open Trade Assistant panel: {ex.Message}");
+                }
+            });
+        }
+
+        /// <summary>
+        /// Embeds the panel into the chart's Chart Trader. No-op when already
+        /// attached, when Chart Trader is unavailable, or when it is collapsed —
+        /// the caller retries (throttled) so the panel appears if the user
+        /// enables Chart Trader later. There is deliberately no overlay fallback.
+        /// </summary>
+        private void TryAttachPanel()
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    if (_panelHost == null || _panel == null || _panelHost.IsAttached) return;
+
+                    ChartTrader trader = ChartControl?.OwnerChart?.ChartTrader;
+                    if (trader == null) return;
+
+                    if (_panelHost.Attach(trader, _panel))
+                        _panel.ApplyContainerTheme(_panelHost.ThemedTextBrush);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[TradeAssistant] Attach panel error: {ex}");
                 }
             });
         }
@@ -250,6 +276,19 @@ namespace NinjaTrader.NinjaScript.Indicators
                 }
 
                 _controller.SetEntryPrice(Close[0]);
+
+                // Drive the auto break-even evaluation off the bar-update tick
+                // stream (proven live) in addition to the MarketData price feed.
+                _breakEvenMonitor?.EvaluatePrice(Close[0]);
+
+                // Panel retry: if Chart Trader was unavailable/collapsed at load,
+                // re-attempt attachment at most once per second.
+                if (_panelHost != null && !_panelHost.IsAttached &&
+                    (DateTime.Now - _lastAttachAttempt).TotalSeconds >= 1)
+                {
+                    _lastAttachAttempt = DateTime.Now;
+                    TryAttachPanel();
+                }
 
                 if (!_initialized)
                 {
@@ -284,7 +323,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             _tpLabelBgBrush  = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0.10f, 0.65f, 0.20f, 0.90f));
             _labelBrush      = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, Color4.White);
             _labelFormat     = new SharpDX.DirectWrite.TextFormat(
-                Core.Globals.DirectWriteFactory, "Segoe UI Semibold", 12.0f);
+                Core.Globals.DirectWriteFactory, "Segoe UI Semibold", 14.0f);
         }
 
         protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
@@ -320,8 +359,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 RenderTarget.FillRectangle(new RectangleF(lastBarX, top, RectWidth, height), _slZoneBrush);
 
                 double slPts = Math.Abs(entryPrice - _stopPrice);
-                float slLabelY = slY > entryY ? slY + 3 : slY - 20;
-                DrawLabelWithBg($"SL  -{slPts:F0} pts", lastBarX + 4, slLabelY, _slLabelBgBrush);
+                float slLabelY = slY > entryY ? slY + 3 : slY - 24;
+                DrawLabelWithBg(
+                    $"SL  {Instrument.MasterInstrument.FormatPrice(_stopPrice)}  -{slPts:F0} pts",
+                    lastBarX + 4, slLabelY, _slLabelBgBrush);
             }
 
             // ── TP zone (derived — not interactive) ──
@@ -332,8 +373,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 RenderTarget.FillRectangle(new RectangleF(lastBarX, top, RectWidth, height), _tpZoneBrush);
 
                 double tpPts = Math.Abs(_tpPrice - entryPrice);
-                float tpLabelY = tpY < entryY ? tpY - 20 : tpY + 3;
-                DrawLabelWithBg($"TP  +{tpPts:F0} pts", lastBarX + 4, tpLabelY, _tpLabelBgBrush);
+                float tpLabelY = tpY < entryY ? tpY - 24 : tpY + 3;
+                DrawLabelWithBg(
+                    $"TP  {Instrument.MasterInstrument.FormatPrice(_tpPrice)}  +{tpPts:F0} pts",
+                    lastBarX + 4, tpLabelY, _tpLabelBgBrush);
             }
 
             // ── Entry line ──
@@ -370,6 +413,13 @@ namespace NinjaTrader.NinjaScript.Indicators
             ChartControl.PreviewMouseUp    += OnChartMouseUp;
             ChartControl.LostMouseCapture  += OnChartLostMouseCapture;
             ChartControl.PreviewKeyDown    += OnChartKeyDown;
+
+            // Detach the panel while this chart's tab is not selected and
+            // re-attach when it becomes active — avoids ghost panels on
+            // multi-tab windows (NT Desktop SDK guidance).
+            _tabControl = ChartControl.OwnerChart?.MainTabControl;
+            if (_tabControl != null)
+                _tabControl.SelectionChanged += OnChartTabSelectionChanged;
         }
 
         private void UnsubscribeChartEvents()
@@ -380,6 +430,44 @@ namespace NinjaTrader.NinjaScript.Indicators
             ChartControl.PreviewMouseUp    -= OnChartMouseUp;
             ChartControl.LostMouseCapture  -= OnChartLostMouseCapture;
             ChartControl.PreviewKeyDown    -= OnChartKeyDown;
+
+            if (_tabControl != null)
+            {
+                _tabControl.SelectionChanged -= OnChartTabSelectionChanged;
+                _tabControl = null;
+            }
+        }
+
+        private void OnChartTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            try
+            {
+                if (!IsOurTabSelected())
+                    Dispatcher.InvokeAsync(() => _panelHost?.Detach());
+                else
+                    TryAttachPanel();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TradeAssistant] Tab change error: {ex}");
+            }
+        }
+
+        private bool IsOurTabSelected()
+        {
+            if (_tabControl == null || ChartControl == null) return true;
+
+            DependencyObject node = ChartControl;
+            while (node != null && !(node is TabItem))
+            {
+                DependencyObject parent = VisualTreeHelper.GetParent(node)
+                    ?? LogicalTreeHelper.GetParent(node);
+                node = parent;
+            }
+
+            var tabItem = node as TabItem;
+            if (tabItem == null) return true; // can't determine — don't detach
+            return ReferenceEquals(tabItem, _tabControl.SelectedItem);
         }
 
         private void UpdateInteractionSnapshot()
@@ -662,6 +750,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 {
                     try
                     {
+                        _panelHost?.Detach();
+                        _panelHost = null;
                         _panel?.Detach();
                         _viewModel?.Dispose();
                     }

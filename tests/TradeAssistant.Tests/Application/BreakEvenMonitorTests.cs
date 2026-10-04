@@ -33,6 +33,45 @@ namespace TradeAssistant.Tests.Application
         }
 
         [Fact]
+        public void Activate_announces_armed_trigger_price()
+        {
+            _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
+
+            Assert.Contains(_status, s => s.Contains("Auto BE armed") && s.Contains("20020.00"));
+        }
+
+        [Fact]
+        public void EvaluatePrice_drives_trigger_without_price_feed()
+        {
+            ToActive();
+            _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
+
+            _sut.EvaluatePrice(20020.00);
+
+            Assert.Equal(20000, Assert.Single(_gateway.StopMoves));
+            Assert.True(_sut.IsTriggered);
+        }
+
+        [Fact]
+        public void Failed_trigger_reports_error_stays_armed_and_retries_next_tick()
+        {
+            ToActive();
+            _sut.Activate(20000, 19980, 1.0, TradeDirection.Long);
+            _gateway.ThrowOnMoveStopTo = true;
+
+            _feed.SetPrice(20020.00); // trigger condition met, move fails
+            Assert.NotEmpty(_errors);
+            Assert.Empty(_gateway.StopMoves);
+            Assert.True(_sut.IsArmed);
+            Assert.False(_sut.IsTriggered);
+
+            _gateway.ThrowOnMoveStopTo = false;
+            _feed.SetPrice(20021.00); // retry on a later tick succeeds
+            Assert.Equal(20000, Assert.Single(_gateway.StopMoves));
+            Assert.True(_sut.IsTriggered);
+        }
+
+        [Fact]
         public void Ctor_guards_against_nulls()
         {
             Assert.Throws<ArgumentNullException>(() => new BreakEvenMonitor(null, _gateway, _sm));

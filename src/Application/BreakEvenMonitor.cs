@@ -71,6 +71,7 @@ namespace TradeAssistant.Application
 
             _triggerPrice = _strategy.CalcBreakEven(fillPrice, stopPrice, beRr);
             _armed        = true;
+            StatusMessage?.Invoke($"Auto BE armed — stop moves to entry at {_triggerPrice:F2}.");
         }
 
         /// <summary>Stops monitoring (e.g. position closed / trade reset).</summary>
@@ -112,7 +113,16 @@ namespace TradeAssistant.Application
             _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         }
 
-        private void OnPriceUpdated(double price)
+        private void OnPriceUpdated(double price) => EvaluatePrice(price);
+
+        /// <summary>
+        /// Evaluates the auto trigger for one observed price. Called from the
+        /// price feed and from the indicator's bar-update tick stream — both
+        /// paths are idempotent via <see cref="_triggered"/>. A failed move is
+        /// reported by <see cref="MoveToBreakEven"/> itself and retried on the
+        /// next tick (the monitor stays armed).
+        /// </summary>
+        public void EvaluatePrice(double price)
         {
             if (!_armed || _triggered || _strategy == null) return;
             if (_stateMachine.Current != TradeState.Active) return;

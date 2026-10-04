@@ -49,7 +49,7 @@ Infrastructure Layer  ←  wraps NinjaTrader API
 Pure C# logic with zero NinjaTrader references. All classes here must be unit-testable in isolation.
 - `RiskCalculator` — converts account risk % or fixed $ to a dollar risk amount
 - `FuturesPositionSizer` — applies the position sizing formula (see below)
-- `StopSnapper` — **SL distance is always a positive multiple of 5 points** (`SnapDistance`, min one step); `SnapToTick` aligns prices to the instrument tick
+- `StopSnapper` — **SL distance is always a positive multiple of the configured SL step** (default 5 points, user-adjustable via the panel's "SL Step (pts)" field / the `SlStepPoints` indicator parameter; snapped to the instrument tick) (`SnapDistance`, min one step); `SnapToTick` aligns prices to the instrument tick
 - `LongStrategy` / `ShortStrategy` — direction-specific TP/BE math behind `IDirectionStrategy`
 - `TradeConfiguration` — immutable value object holding all user inputs (risk, RR, break-even RR, SL step, default SL)
 - `TradePlan` — computed result: contracts, risk $, profit $, SL/TP prices, SL distance, RR, direction
@@ -66,7 +66,7 @@ Min-risk rule     = if Contracts >= 1 and realized risk < $100 (TradeConfigurati
 
 ### Application Layer (`/src/Application`)
 Coordinates domain logic with UI and infrastructure. No direct NinjaTrader API calls.
-- `TradePlannerController` — owns inputs; SL distance snapped to 5-pt steps; **TP always derived as SL distance × configured RR (RR never mutates)**; `NudgeStop(±1)` for the ▲▼ panel buttons; emits `PlanUpdated`
+- `TradePlannerController` — owns inputs; SL distance snapped to the configured SL step; **TP always derived as SL distance × configured RR (RR never mutates)**; `NudgeStop(±1)` for the ▲▼ panel buttons; `SetSlStepPoints` re-snaps a placed stop; emits `PlanUpdated`
 - `BracketExecutionCoordinator` — market entry → on fill submits OCO bracket anchored to `AverageFillPrice`; drives the state machine
 - `BreakEvenMonitor` — event-driven via `IPriceFeed` (never polls); auto-moves stop to entry at the configured RR multiple; manual `MoveToBreakEven()` for the B key / panel button
 - `ChartInteractionController` — testable drag state machine: X-bounds + Y-tolerance hit test, idempotent begin, unconditional end/cancel (fixes stuck-drag bug)
@@ -78,14 +78,15 @@ Thin adapters over NinjaTrader API. Instrument tick values must always come from
 - `NinjaPriceFeed` — wraps `Bars.Instrument.MarketData.Update` (last-price events)
 - `NinjaInstrumentInfoProvider` — exposes TickSize, TickValue, PointValue
 - `NinjaAccountDataProvider` — reads account balance
+- `ChartTraderPanelHost` — embeds a WPF element into Chart Trader by appending a row to its internal `grdMain` grid (NT SDK pattern)
 
 ### UI Layer (`/src/UI`)
-WPF panel embedded in the chart, strict MVVM. No trading logic in views or code-behind.
+WPF panel embedded in the chart's Chart Trader, strict MVVM. No trading logic in views or code-behind. Two host modes via `PanelHostMode`: `ChartOverlay` (floating, hardcoded dark theme) and `ChartTrader` (stretches inside Chart Trader as a distinct dark container card via `ApplyContainerTheme`). No overlay fallback — when Chart Trader is disabled the panel is hidden.
 - `TradePlannerViewModel` — all bindable properties and commands; no NinjaTrader refs (unit-tested)
-- `TradePlannerView` — **two surfaces must stay in sync**: code-built `BuildLayout()` in `TradePlannerView.xaml.cs` (primary, on chart) and `TradePlannerView.xaml` markup
+- `TradePlannerView` — **two surfaces must stay in sync**: code-built `BuildLayout()` in `TradePlannerView.xaml.cs` (primary, in Chart Trader) and `TradePlannerView.xaml` markup
 
 ### Indicator (`/src/TradeAssistantIndicator.cs`)
-Thin composition root: wires layers, translates chart mouse/keyboard events into controller calls, renders zones/labels allocation-free. Hotkeys: **B** manual break-even. SL adjusts via drag or the ▲▼ panel buttons (±5 pts) — ↑/↓ keep NT8 default chart scrolling. Execution is triggered from the panel's EXECUTE button.
+Thin composition root: wires layers, translates chart mouse/keyboard events into controller calls, renders zones/labels allocation-free. Hotkeys: **B** manual break-even. SL adjusts via drag or the ▲▼ panel buttons (±1 SL step) — ↑/↓ keep NT8 default chart scrolling. Execution is triggered from the panel's EXECUTE button. The panel is attached to Chart Trader via `ChartTraderPanelHost` (retried ~1s while unattached; detached/re-attached on chart tab selection changes).
 
 ## Key Behavioral Rules
 
@@ -93,7 +94,7 @@ Thin composition root: wires layers, translates chart mouse/keyboard events into
 
 **Contracts:** Always `int`, always `>= 1`. Use `Math.Floor`. Guard against zero (account too small / stop too tight). Realized risk (contracts × risk-per-contract) must never fall below `TradeConfiguration.MinRiskDollars` ($100) — the sizer adds one contract, or rescues a 0-contract result to 1 contract, to honor the floor.
 
-**Chart interactivity:** Only the SL line is draggable. Dragging SL → distance snapped to a multiple of 5 pts → TP re-derived from configured RR. TP is never draggable.
+**Chart interactivity:** Only the SL line is draggable. Dragging SL → distance snapped to a multiple of the configured SL step → TP re-derived from configured RR. TP is never draggable.
 
 **Bracket execution sequence (no ATM), triggered by the panel EXECUTE button:**
 1. Validate `TradePlan.IsValid` and `Contracts >= 1`

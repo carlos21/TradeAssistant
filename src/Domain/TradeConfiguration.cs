@@ -55,21 +55,22 @@ namespace TradeAssistant.Domain
 
         /// <summary>Returns a copy with the given fields replaced.</summary>
         public TradeConfiguration With(
-            RiskMode? riskMode    = null,
-            double?   riskValue   = null,
-            double?   rrRatio     = null,
-            double?   breakEvenRr = null)
+            RiskMode? riskMode      = null,
+            double?   riskValue     = null,
+            double?   rrRatio       = null,
+            double?   breakEvenRr   = null,
+            double?   slStepPoints  = null)
         {
             return new TradeConfiguration(
-                riskMode    ?? RiskMode,
-                riskValue   ?? RiskValue,
-                rrRatio     ?? RrRatio,
-                breakEvenRr ?? BreakEvenRr,
-                SlStepPoints,
+                riskMode     ?? RiskMode,
+                riskValue    ?? RiskValue,
+                rrRatio      ?? RrRatio,
+                breakEvenRr  ?? BreakEvenRr,
+                slStepPoints ?? SlStepPoints,
                 DefaultSlPoints);
         }
 
         public static TradeConfiguration Default =>
-            new TradeConfiguration(RiskMode.FixedAmount, 120.0, 4.0, 1.0);
+            new TradeConfiguration(RiskMode.FixedAmount, 120.0, 4.0, 3.0);
     }
 }

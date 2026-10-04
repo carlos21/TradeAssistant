@@ -19,7 +19,7 @@ namespace TradeAssistant.Tests.UI
         public TradePlannerViewModelTests()
         {
             _controller = new TradePlannerController(_instrument, _account,
-                new TradeConfiguration(RiskMode.FixedAmount, 800, 4.0, 1.0));
+                new TradeConfiguration(RiskMode.FixedAmount, 800, 4.0, 3.0));
             _vm = new TradePlannerViewModel(_controller, _sm);
         }
 
@@ -56,6 +56,33 @@ namespace TradeAssistant.Tests.UI
 
             Assert.Equal(RiskMode.FixedAmount, _vm.RiskMode);
             Assert.True(_vm.ShowTradeBoxes);
+        }
+
+        [Fact]
+        public void SlStepPoints_defaults_to_five_and_flows_to_controller()
+        {
+            Assert.Equal(5.0, _vm.SlStepPoints);
+            Assert.Contains("steps of 5 pts", _vm.AdjustHint);
+
+            _vm.SlStepPoints = 2;
+
+            Assert.Equal(2.0, _vm.SlStepPoints);
+            Assert.Equal(2.0, _controller.Config.SlStepPoints);
+            Assert.Contains("steps of 2 pts", _vm.AdjustHint);
+        }
+
+        [Fact]
+        public void Invalid_sl_step_pops_error_and_reverts()
+        {
+            var errors = new List<(string title, string message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+
+            _vm.SlStepPoints = 0;
+
+            Assert.Single(errors);
+            Assert.Equal("Invalid SL Step", errors[0].title);
+            Assert.Equal(5.0, _vm.SlStepPoints);              // reverted to config value
+            Assert.Equal(5.0, _controller.Config.SlStepPoints); // controller untouched
         }
 
         [Fact]
@@ -97,19 +124,28 @@ namespace TradeAssistant.Tests.UI
         }
 
         [Fact]
-        public void Switching_to_fixed_amount_clamps_sub_minimum_percentage_value()
+        public void Switching_risk_mode_applies_mode_defaults()
         {
-            var errors = new List<(string title, string message)>();
-            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+            _vm.RiskMode = RiskMode.Percentage;
+            Assert.Equal(1.0, _vm.RiskValue);
+            Assert.Equal(1.0, _controller.Config.RiskValue);
+            Assert.Equal(RiskMode.Percentage, _controller.Config.RiskMode);
 
-            _vm.RiskMode  = RiskMode.Percentage;
-            _vm.RiskValue = 1.0; // 1% — fine in percentage mode
-
+            _vm.RiskValue = 2.5; // custom value is replaced by the default on switch
             _vm.RiskMode = RiskMode.FixedAmount;
+            Assert.Equal(120.0, _vm.RiskValue);
+            Assert.Equal(120.0, _controller.Config.RiskValue);
+            Assert.Equal(RiskMode.FixedAmount, _controller.Config.RiskMode);
+        }
 
-            Assert.Equal(100.0, _vm.RiskValue);
-            Assert.Equal(100.0, _controller.Config.RiskValue);
-            Assert.Single(errors);
+        [Fact]
+        public void Reapplying_same_risk_mode_keeps_custom_value()
+        {
+            _vm.RiskValue = 250.0;
+
+            _vm.RiskMode = RiskMode.FixedAmount; // unchanged — no reset
+
+            Assert.Equal(250.0, _vm.RiskValue);
         }
 
         [Fact]
@@ -383,8 +419,8 @@ namespace TradeAssistant.Tests.UI
         public void AutoBreakEven_defaults_true_matching_default_be_rr()
         {
             Assert.True(_vm.AutoBreakEven);
-            Assert.Equal(1.0, _vm.BreakEvenRr);
-            Assert.Equal(1.0, _controller.Config.BreakEvenRr);
+            Assert.Equal(3.0, _vm.BreakEvenRr);
+            Assert.Equal(3.0, _controller.Config.BreakEvenRr);
         }
 
         [Fact]
@@ -402,12 +438,12 @@ namespace TradeAssistant.Tests.UI
         {
             _vm.AutoBreakEven = false;
             _vm.AutoBreakEven = true;
-            Assert.Equal(1.0, _vm.BreakEvenRr);
+            Assert.Equal(3.0, _vm.BreakEvenRr);
 
             _vm.BreakEvenRr = 2.5;
             _vm.AutoBreakEven = false;
             _vm.AutoBreakEven = true;
-            Assert.Equal(1.0, _vm.BreakEvenRr); // restored from 0, custom value was already cleared
+            Assert.Equal(3.0, _vm.BreakEvenRr); // restored from 0, custom value was already cleared
 
             _vm.BreakEvenRr = 2.5;
             _vm.AutoBreakEven = true; // already checked with a custom RR — untouched

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -9,13 +10,21 @@ using TradeAssistant.Domain;
 namespace TradeAssistant.UI
 {
     /// <summary>
-    /// Trade planner panel embedded directly into the NinjaTrader chart.
-    /// Built as a Border so it can be added to the chart's WPF Grid.
-    /// Positioned top-right with semi-transparent background.
+    /// Trade planner panel. Hosted either as a floating overlay on the chart
+    /// (PanelHostMode.ChartOverlay) or embedded inside the chart's Chart
+    /// Trader panel (PanelHostMode.ChartTrader). Built as a Border so it can
+    /// be added to a WPF Grid in either host.
     /// </summary>
     public class TradePlannerView : Border
     {
         private Button _dirBtn;
+
+        // Controls restyled by ApplyContainerTheme when hosted inside Chart Trader
+        private readonly List<TextBlock> _themeLabels = new List<TextBlock>();
+        private readonly List<TextBlock> _themeValues = new List<TextBlock>();
+        private readonly List<TextBox>   _themeInputs = new List<TextBox>();
+        private readonly List<ComboBox>  _themeCombos = new List<ComboBox>();
+        private readonly List<CheckBox>  _themeChecks = new List<CheckBox>();
 
         private static readonly SolidColorBrush LongBrush  = CreateFrozenBrush(Color.FromRgb(0x2E, 0x7D, 0x32));
         private static readonly SolidColorBrush ShortBrush = CreateFrozenBrush(Color.FromRgb(0xC6, 0x28, 0x28));
@@ -27,21 +36,16 @@ namespace TradeAssistant.UI
             return brush;
         }
 
-        public TradePlannerView(TradePlannerViewModel viewModel)
+        public TradePlannerView(TradePlannerViewModel viewModel,
+            PanelHostMode mode = PanelHostMode.ChartOverlay)
         {
-            DataContext          = viewModel;
-            Width                = 260;
-            HorizontalAlignment  = HorizontalAlignment.Right;
-            VerticalAlignment    = VerticalAlignment.Top;
-            Margin               = new Thickness(0, 10, 75, 0);
-            Background           = new SolidColorBrush(Color.FromArgb(0xE8, 0x1E, 0x1E, 0x1E));
-            BorderBrush          = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44));
-            BorderThickness      = new Thickness(1);
-            CornerRadius         = new CornerRadius(4);
-            Padding              = new Thickness(12);
-            IsHitTestVisible     = true;
+            DataContext = viewModel;
+            Child       = BuildLayout();
 
-            Child = BuildLayout();
+            if (mode == PanelHostMode.ChartTrader)
+                ApplyChartTraderChrome();
+            else
+                ApplyChartOverlayChrome();
 
             // Keep direction button color in sync with direction changes
             viewModel.PropertyChanged += (s, e) =>
@@ -49,6 +53,80 @@ namespace TradeAssistant.UI
                 if (e.PropertyName == nameof(TradePlannerViewModel.DirectionLabel) && _dirBtn != null)
                     _dirBtn.Background = viewModel.DirectionLabel == "LONG" ? LongBrush : ShortBrush;
             };
+        }
+
+        private void ApplyChartOverlayChrome()
+        {
+            Width               = 260;
+            HorizontalAlignment = HorizontalAlignment.Right;
+            VerticalAlignment   = VerticalAlignment.Top;
+            Margin              = new Thickness(0, 24, 75, 0);
+            Background          = new SolidColorBrush(Color.FromArgb(0xE8, 0x1E, 0x1E, 0x1E));
+            BorderBrush         = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44));
+            BorderThickness     = new Thickness(1);
+            CornerRadius        = new CornerRadius(4);
+            Padding             = new Thickness(12);
+            IsHitTestVisible    = true;
+        }
+
+        private void ApplyChartTraderChrome()
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch;
+            VerticalAlignment   = VerticalAlignment.Top;
+            Margin              = new Thickness(4, 12, 4, 4);
+            Background          = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
+            BorderBrush         = new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x5A));
+            BorderThickness     = new Thickness(1);
+            CornerRadius        = new CornerRadius(4);
+            Padding             = new Thickness(8, 12, 8, 8);
+            IsHitTestVisible    = true;
+        }
+
+        /// <summary>
+        /// Restyles the panel for its container card inside Chart Trader.
+        /// <paramref name="hostTextBrush"/> is Chart Trader's themed text
+        /// brush: a light brush means Chart Trader itself is dark, so the card
+        /// is lightened to stay visibly separate; a dark brush means a light
+        /// Chart Trader, so the card stays dark. Card text keeps a fixed
+        /// light palette for guaranteed contrast in both cases.
+        /// </summary>
+        public void ApplyContainerTheme(Brush hostTextBrush)
+        {
+            bool hostIsDark = IsLight(hostTextBrush);
+            Color cardColor = hostIsDark
+                ? Color.FromRgb(0x3A, 0x3A, 0x3A)
+                : Color.FromRgb(0x1E, 0x1E, 0x1E);
+            Background  = new SolidColorBrush(cardColor);
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x5A));
+
+            var labelBrush  = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA));
+            var valueBrush  = Brushes.White;
+            var inputBg     = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
+            var inputBorder = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55));
+
+            foreach (TextBlock lbl in _themeLabels) lbl.Foreground = labelBrush;
+            foreach (TextBlock val in _themeValues) val.Foreground = valueBrush;
+            foreach (TextBox tb in _themeInputs)
+            {
+                tb.Foreground   = valueBrush;
+                tb.Background   = inputBg;
+                tb.BorderBrush  = inputBorder;
+            }
+            foreach (ComboBox cb in _themeCombos)
+            {
+                cb.Foreground   = valueBrush;
+                cb.Background   = inputBg;
+                cb.BorderBrush  = inputBorder;
+            }
+            foreach (CheckBox chk in _themeChecks) chk.Foreground = labelBrush;
+        }
+
+        private static bool IsLight(Brush brush)
+        {
+            var solid = brush as SolidColorBrush;
+            if (solid == null) return false;
+            Color c = solid.Color;
+            return 0.299 * c.R + 0.587 * c.G + 0.114 * c.B > 128;
         }
 
         public void Detach()
@@ -62,30 +140,32 @@ namespace TradeAssistant.UI
         {
             var root = new StackPanel();
             root.SetValue(TextBlock.FontFamilyProperty, new FontFamily("Segoe UI"));
-            root.SetValue(TextBlock.FontSizeProperty, 13.0);
+            root.SetValue(TextBlock.FontSizeProperty, 12.0);
             root.SetValue(TextBlock.ForegroundProperty, Brushes.White);
 
             // Header
-            root.Children.Add(new TextBlock
+            var header = new TextBlock
             {
                 Text       = "TRADE ASSISTANT",
-                FontSize   = 11,
+                FontSize   = 10,
                 FontWeight = FontWeights.Bold,
                 Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
-                Margin     = new Thickness(0, 0, 0, 10)
-            });
+                Margin     = new Thickness(0, 0, 0, 6)
+            };
+            _themeLabels.Add(header);
+            root.Children.Add(header);
 
             // Direction toggle — full-width, green for LONG / red for SHORT
             var vm = DataContext as TradePlannerViewModel;
             _dirBtn = new Button
             {
-                FontSize        = 14,
+                FontSize        = 12,
                 FontWeight      = FontWeights.Bold,
-                Height          = 36,
+                Height          = 28,
                 Cursor          = System.Windows.Input.Cursors.Hand,
                 Foreground      = Brushes.White,
                 BorderThickness = new Thickness(0),
-                Margin          = new Thickness(0, 0, 0, 8),
+                Margin          = new Thickness(0, 0, 0, 5),
                 Background      = vm?.DirectionLabel == "SHORT" ? ShortBrush : LongBrush
             };
             _dirBtn.SetBinding(Button.ContentProperty, new Binding("DirectionLabel"));
@@ -103,12 +183,13 @@ namespace TradeAssistant.UI
             root.Children.Add(MakeCheckboxRow("Show Boxes", "ShowTradeBoxes"));
             root.Children.Add(MakeSeparator());
 
-            // SL adjuster: ▼ / ▲ buttons (±5 pts per click)
+            // SL adjuster: ▼ / ▲ buttons (±1 step per click)
             root.Children.Add(MakeSlAdjusterRow());
+            root.Children.Add(MakeInputRow("SL Step (pts)", "SlStepPoints", "{0:0.##}"));
             root.Children.Add(MakeSeparator());
 
             // Plan display
-            root.Children.Add(MakeValueRow("Contracts", "Contracts",     null,      null, 20));
+            root.Children.Add(MakeValueRow("Contracts", "Contracts",     null,      null, 15));
             root.Children.Add(MakeValueRow("Risk $",    "RiskDollars",   "${0:F0}", Color.FromRgb(0xEF, 0x53, 0x50)));
             root.Children.Add(MakeValueRow("Profit $",  "ProfitDollars", "${0:F0}", Color.FromRgb(0x66, 0xBB, 0x6A)));
             root.Children.Add(MakeSeparator());
@@ -117,16 +198,16 @@ namespace TradeAssistant.UI
             var armedBorder = new Border
             {
                 Background   = new SolidColorBrush(Color.FromRgb(0xF5, 0x7F, 0x17)),
-                CornerRadius = new CornerRadius(4),
-                Padding      = new Thickness(8, 4, 8, 4),
-                Margin       = new Thickness(0, 8, 0, 8),
+                CornerRadius = new CornerRadius(3),
+                Padding      = new Thickness(6, 2, 6, 2),
+                Margin       = new Thickness(0, 5, 0, 5),
                 Child = new TextBlock
                 {
                     Text                = "ARMED — Click Execute",
                     FontWeight          = FontWeights.Bold,
                     Foreground          = Brushes.Black,
                     HorizontalAlignment = HorizontalAlignment.Center,
-                    FontSize            = 11
+                    FontSize            = 10
                 }
             };
             armedBorder.SetBinding(VisibilityProperty,
@@ -137,11 +218,12 @@ namespace TradeAssistant.UI
             var status = new TextBlock
             {
                 Foreground   = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
-                FontSize     = 11,
+                FontSize     = 10,
                 TextWrapping = TextWrapping.Wrap,
-                Margin       = new Thickness(0, 0, 0, 8)
+                Margin       = new Thickness(0, 0, 0, 5)
             };
             status.SetBinding(TextBlock.TextProperty, new Binding("StatusMessage"));
+            _themeLabels.Add(status);
             root.Children.Add(status);
 
             // Execute button
@@ -150,9 +232,9 @@ namespace TradeAssistant.UI
                 Content         = "EXECUTE",
                 Background      = new SolidColorBrush(Color.FromRgb(0xE6, 0x51, 0x00)),
                 Foreground      = Brushes.White,
-                FontSize        = 13,
+                FontSize        = 12,
                 FontWeight      = FontWeights.Bold,
-                Height          = 36,
+                Height          = 28,
                 Cursor          = System.Windows.Input.Cursors.Hand,
                 BorderThickness = new Thickness(0)
             };
@@ -163,14 +245,14 @@ namespace TradeAssistant.UI
             var beBtn = new Button
             {
                 Content         = "BREAK-EVEN",
-                Background      = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
-                Foreground      = Brushes.White,
-                FontSize        = 12,
+                Background      = new SolidColorBrush(Color.FromRgb(0xFF, 0xD8, 0x1A)),
+                Foreground      = Brushes.Black,
+                FontSize        = 11,
                 FontWeight      = FontWeights.Bold,
-                Height          = 28,
+                Height          = 22,
                 Cursor          = System.Windows.Input.Cursors.Hand,
                 BorderThickness = new Thickness(0),
-                Margin          = new Thickness(0, 6, 0, 0)
+                Margin          = new Thickness(0, 4, 0, 0)
             };
             beBtn.SetBinding(Button.CommandProperty, new Binding("BreakEvenCommand"));
             root.Children.Add(beBtn);
@@ -178,10 +260,10 @@ namespace TradeAssistant.UI
             return root;
         }
 
-        private static UIElement MakeInputRow(string label, string binding, string format)
+        private UIElement MakeInputRow(string label, string binding, string format)
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
 
             var lbl = new TextBlock
@@ -189,8 +271,9 @@ namespace TradeAssistant.UI
                 Text              = label,
                 Foreground        = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize          = 12
+                FontSize          = 11
             };
+            _themeLabels.Add(lbl);
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
 
@@ -200,11 +283,12 @@ namespace TradeAssistant.UI
                 Foreground               = Brushes.White,
                 BorderBrush              = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
                 BorderThickness          = new Thickness(1),
-                Padding                  = new Thickness(4, 2, 4, 2),
-                Height                   = 24,
+                Padding                  = new Thickness(3, 1, 3, 1),
+                Height                   = 20,
                 VerticalContentAlignment = VerticalAlignment.Center,
-                FontSize                 = 12
+                FontSize                 = 11
             };
+            _themeInputs.Add(tb);
             tb.SetBinding(TextBox.TextProperty,
                 new Binding(binding)
                 {
@@ -221,10 +305,10 @@ namespace TradeAssistant.UI
             return grid;
         }
 
-        private static UIElement MakeBreakEvenRow()
+        private UIElement MakeBreakEvenRow()
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -233,8 +317,9 @@ namespace TradeAssistant.UI
                 Text              = "BE at R:R",
                 Foreground        = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize          = 12
+                FontSize          = 11
             };
+            _themeLabels.Add(lbl);
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
 
@@ -244,11 +329,12 @@ namespace TradeAssistant.UI
                 Foreground               = Brushes.White,
                 BorderBrush              = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
                 BorderThickness          = new Thickness(1),
-                Padding                  = new Thickness(4, 2, 4, 2),
-                Height                   = 24,
+                Padding                  = new Thickness(3, 1, 3, 1),
+                Height                   = 20,
                 VerticalContentAlignment = VerticalAlignment.Center,
-                FontSize                 = 12
+                FontSize                 = 11
             };
+            _themeInputs.Add(tb);
             tb.SetBinding(TextBox.TextProperty,
                 new Binding("BreakEvenRr")
                 {
@@ -266,6 +352,7 @@ namespace TradeAssistant.UI
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin            = new Thickness(8, 0, 0, 0)
             };
+            _themeChecks.Add(autoBe);
             autoBe.SetBinding(CheckBox.IsCheckedProperty,
                 new Binding("AutoBreakEven")
                 {
@@ -277,10 +364,10 @@ namespace TradeAssistant.UI
             return grid;
         }
 
-        private static UIElement MakeRiskModeRow()
+        private UIElement MakeRiskModeRow()
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
 
             var lbl = new TextBlock
@@ -288,8 +375,9 @@ namespace TradeAssistant.UI
                 Text = "Risk Mode",
                 Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 12
+                FontSize = 11
             };
+            _themeLabels.Add(lbl);
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
 
@@ -299,11 +387,12 @@ namespace TradeAssistant.UI
                 Foreground = Brushes.White,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
                 BorderThickness = new Thickness(1),
-                Padding = new Thickness(4, 2, 4, 2),
-                Height = 24,
+                Padding = new Thickness(3, 1, 3, 1),
+                Height = 20,
                 VerticalContentAlignment = VerticalAlignment.Center,
-                FontSize = 12
+                FontSize = 11
             };
+            _themeCombos.Add(combo);
             
             // Add RiskMode enum values
             combo.Items.Add(new ComboBoxItem { Content = "Percentage", Tag = RiskMode.Percentage });
@@ -323,10 +412,10 @@ namespace TradeAssistant.UI
             return grid;
         }
 
-        private static UIElement MakeCheckboxRow(string label, string binding)
+        private UIElement MakeCheckboxRow(string label, string binding)
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
 
             var lbl = new TextBlock
@@ -334,8 +423,9 @@ namespace TradeAssistant.UI
                 Text = label,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 12
+                FontSize = 11
             };
+            _themeLabels.Add(lbl);
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
 
@@ -344,6 +434,7 @@ namespace TradeAssistant.UI
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = Brushes.White
             };
+            _themeChecks.Add(checkBox);
             checkBox.SetBinding(CheckBox.IsCheckedProperty,
                 new Binding(binding)
                 {
@@ -356,19 +447,20 @@ namespace TradeAssistant.UI
             return grid;
         }
 
-        private static UIElement MakeDynamicInputRow(string labelBinding, string valueBinding, string format)
+        private UIElement MakeDynamicInputRow(string labelBinding, string valueBinding, string format)
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 5) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
 
             var lbl = new TextBlock
             {
                 Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 12
+                FontSize = 11
             };
             lbl.SetBinding(TextBlock.TextProperty, new Binding(labelBinding));
+            _themeLabels.Add(lbl);
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
 
@@ -378,11 +470,12 @@ namespace TradeAssistant.UI
                 Foreground = Brushes.White,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
                 BorderThickness = new Thickness(1),
-                Padding = new Thickness(4, 2, 4, 2),
-                Height = 24,
+                Padding = new Thickness(3, 1, 3, 1),
+                Height = 20,
                 VerticalContentAlignment = VerticalAlignment.Center,
-                FontSize = 12
+                FontSize = 11
             };
+            _themeInputs.Add(tb);
             tb.SetBinding(TextBox.TextProperty,
                 new Binding(valueBinding)
                 {
@@ -396,11 +489,11 @@ namespace TradeAssistant.UI
             return grid;
         }
 
-        private static UIElement MakeValueRow(string label, string binding, string format,
-            Color? fg, double fontSize = 13)
+        private UIElement MakeValueRow(string label, string binding, string format,
+            Color? fg, double fontSize = 12)
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
 
             var lbl = new TextBlock
@@ -408,8 +501,9 @@ namespace TradeAssistant.UI
                 Text              = label,
                 Foreground        = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize          = 12
+                FontSize          = 11
             };
+            _themeLabels.Add(lbl);
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
 
@@ -422,6 +516,7 @@ namespace TradeAssistant.UI
                     ? new SolidColorBrush(fg.Value)
                     : Brushes.White
             };
+            if (!fg.HasValue) _themeValues.Add(val);
             val.SetBinding(TextBlock.TextProperty,
                 new Binding(binding) { StringFormat = format });
             Grid.SetColumn(val, 1);
@@ -437,9 +532,9 @@ namespace TradeAssistant.UI
                 Background    = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D)),
                 BorderBrush   = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
                 BorderThickness = new Thickness(1),
-                CornerRadius  = new CornerRadius(4),
-                Padding       = new Thickness(8),
-                Margin        = new Thickness(0, 0, 0, 5)
+                CornerRadius  = new CornerRadius(3),
+                Padding       = new Thickness(5),
+                Margin        = new Thickness(0, 0, 0, 3)
             };
 
             var buttons = new Grid
@@ -450,11 +545,11 @@ namespace TradeAssistant.UI
             buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
             buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var downBtn = MakeNudgeButton("▼", "NudgeDownCommand", "Tighter SL (-5 pts)");
+            var downBtn = MakeNudgeButton("▼", "NudgeDownCommand", "Tighter SL (−1 step)");
             Grid.SetColumn(downBtn, 0);
             buttons.Children.Add(downBtn);
 
-            var upBtn = MakeNudgeButton("▲", "NudgeUpCommand", "Wider SL (+5 pts)");
+            var upBtn = MakeNudgeButton("▲", "NudgeUpCommand", "Wider SL (+1 step)");
             Grid.SetColumn(upBtn, 2);
             buttons.Children.Add(upBtn);
 
@@ -469,9 +564,9 @@ namespace TradeAssistant.UI
                 Content                    = content,
                 Background                 = new SolidColorBrush(Color.FromRgb(0x3D, 0x3D, 0x3D)),
                 Foreground                 = Brushes.White,
-                FontSize                   = 9,
-                Width                      = 16,
-                Height                     = 16,
+                FontSize                   = 8,
+                Width                      = 14,
+                Height                     = 14,
                 Padding                    = new Thickness(0),
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 VerticalContentAlignment   = VerticalAlignment.Center,
@@ -488,7 +583,7 @@ namespace TradeAssistant.UI
             return new Separator
             {
                 Background = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
-                Margin     = new Thickness(0, 2, 0, 8)
+                Margin     = new Thickness(0, 1, 0, 5)
             };
         }
 

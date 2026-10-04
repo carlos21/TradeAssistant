@@ -252,6 +252,52 @@ namespace TradeAssistant.Tests.Application
             Assert.Equal(20, _sut.SlDistancePoints); // 15 re-snapped to step 10
         }
 
+        [Fact]
+        public void SetSlStepPoints_snaps_to_instrument_tick()
+        {
+            _sut.SetSlStepPoints(1.3);
+
+            Assert.Equal(1.25, _sut.Config.SlStepPoints); // tick 0.25 → nearest tick multiple
+        }
+
+        [Fact]
+        public void SetSlStepPoints_clamps_to_one_tick_minimum()
+        {
+            _sut.SetSlStepPoints(0.1);
+
+            Assert.Equal(0.25, _sut.Config.SlStepPoints);
+        }
+
+        [Fact]
+        public void SetSlStepPoints_throws_on_non_positive()
+        {
+            Assert.Throws<ArgumentException>(() => _sut.SetSlStepPoints(0));
+            Assert.Throws<ArgumentException>(() => _sut.SetSlStepPoints(-5));
+            Assert.Equal(5.0, _sut.Config.SlStepPoints); // unchanged
+        }
+
+        [Fact]
+        public void SetSlStepPoints_throws_above_default_sl_distance()
+        {
+            ArgumentException ex = Assert.Throws<ArgumentException>(() => _sut.SetSlStepPoints(25));
+            Assert.Contains("default SL distance", ex.Message);
+        }
+
+        [Fact]
+        public void SetSlStepPoints_nudge_and_drag_follow_new_step()
+        {
+            SetupValidPlan(); // 20 pts at step 5
+            _sut.SetSlStepPoints(1);
+
+            Assert.Equal(20, _sut.SlDistancePoints); // already a multiple of 1
+
+            _sut.NudgeStop(1);
+            Assert.Equal(21, _sut.SlDistancePoints);
+
+            _sut.SetStopFromPrice(19986.6); // 13.4 pts → snaps to 13
+            Assert.Equal(13, _sut.SlDistancePoints);
+        }
+
         // ── Invalid plans ───────────────────────────────────────────────────
 
         [Fact]

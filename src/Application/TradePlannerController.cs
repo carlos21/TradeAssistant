@@ -58,6 +58,33 @@ namespace TradeAssistant.Application
 
         public void SetRiskMode(RiskMode mode)   => UpdateConfiguration(_config.With(riskMode: mode));
         public void SetRiskValue(double value)   => UpdateConfiguration(_config.With(riskValue: value));
+
+        /// <summary>Atomic mode+value change — avoids invalid intermediate states
+        /// (e.g. FixedAmount with a sub-minimum value during the transition).</summary>
+        public void SetRiskModeAndValue(RiskMode mode, double value) =>
+            UpdateConfiguration(_config.With(riskMode: mode, riskValue: value));
+
+        /// <summary>
+        /// Sets the SL step in points. The step is snapped to the instrument
+        /// tick (minimum one tick) so every derived stop price stays tick-aligned.
+        /// An already-placed stop is re-snapped to the new step by
+        /// <see cref="UpdateConfiguration"/>.
+        /// </summary>
+        public void SetSlStepPoints(double value)
+        {
+            if (value <= 0)
+                throw new ArgumentException("SL step must be positive.", nameof(value));
+
+            double snapped = Math.Max(
+                _instrument.TickSize, StopSnapper.SnapToTick(value, _instrument.TickSize));
+
+            if (snapped > _config.DefaultSlPoints)
+                throw new ArgumentException(
+                    $"SL step cannot exceed the default SL distance ({_config.DefaultSlPoints:0.##} pts).",
+                    nameof(value));
+
+            UpdateConfiguration(_config.With(slStepPoints: snapped));
+        }
         public void SetRrRatio(double value)     => UpdateConfiguration(_config.With(rrRatio: value));
         public void SetBreakEvenRr(double value) => UpdateConfiguration(_config.With(breakEvenRr: value));
 

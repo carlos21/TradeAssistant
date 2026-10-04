@@ -14,7 +14,7 @@ namespace TradeAssistant.Tests.Domain
             Assert.Equal(RiskMode.FixedAmount, c.RiskMode);
             Assert.Equal(120.0, c.RiskValue);
             Assert.Equal(4.0, c.RrRatio);
-            Assert.Equal(1.0, c.BreakEvenRr);
+            Assert.Equal(3.0, c.BreakEvenRr);
             Assert.Equal(5.0, c.SlStepPoints);
             Assert.Equal(20.0, c.DefaultSlPoints);
         }
@@ -121,6 +121,16 @@ namespace TradeAssistant.Tests.Domain
             var copy = TradeConfiguration.Default.With(rrRatio: 2.5, breakEvenRr: 0.75);
             Assert.Equal(2.5, copy.RrRatio);
             Assert.Equal(0.75, copy.BreakEvenRr);
+        }
+
+        [Fact]
+        public void With_sl_step_points_replaces_only_that_field()
+        {
+            var copy = TradeConfiguration.Default.With(slStepPoints: 1.0);
+
+            Assert.Equal(1.0, copy.SlStepPoints);
+            Assert.Equal(TradeConfiguration.Default.RiskValue, copy.RiskValue);
+            Assert.Equal(TradeConfiguration.Default.DefaultSlPoints, copy.DefaultSlPoints);
         }
 
         [Fact]

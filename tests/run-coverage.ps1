@@ -3,6 +3,9 @@
 $ErrorActionPreference = 'Stop'
 
 $dotnet = 'C:\Program Files\dotnet\dotnet.exe'
+if (-not (Test-Path $dotnet)) {
+    $dotnet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
+}
 $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Push-Location $testsDir

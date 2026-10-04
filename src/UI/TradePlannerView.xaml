@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:TradeAssistant.UI"
         xmlns:domain="clr-namespace:TradeAssistant.Domain"
         Title="Trade Assistant"
-        Width="300"
+        Width="280"
         SizeToContent="Height"
         ResizeMode="CanMinimize"
         WindowStyle="ToolWindow"
@@ -12,7 +12,7 @@
         Background="#1E1E1E"
         Foreground="White"
         FontFamily="Segoe UI"
-        FontSize="13">
+        FontSize="12">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
@@ -24,8 +24,8 @@
             <Setter Property="Foreground"   Value="White"/>
             <Setter Property="BorderBrush"  Value="#555"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding"      Value="4,2"/>
-            <Setter Property="Height"       Value="26"/>
+            <Setter Property="Padding"      Value="3,1"/>
+            <Setter Property="Height"       Value="20"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
@@ -34,7 +34,7 @@
             <Setter Property="Background"   Value="#2D2D2D"/>
             <Setter Property="Foreground"   Value="White"/>
             <Setter Property="BorderBrush"  Value="#555"/>
-            <Setter Property="Height"       Value="26"/>
+            <Setter Property="Height"       Value="20"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
@@ -42,7 +42,7 @@
         <Style x:Key="LabelStyle" TargetType="TextBlock">
             <Setter Property="Foreground"   Value="#AAAAAA"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="FontSize"     Value="12"/>
+            <Setter Property="FontSize"     Value="11"/>
         </Style>
 
         <!-- Value display style -->
@@ -54,9 +54,9 @@
 
         <!-- Direction button -->
         <Style x:Key="DirectionButtonStyle" TargetType="Button">
-            <Setter Property="FontSize"     Value="14"/>
+            <Setter Property="FontSize"     Value="12"/>
             <Setter Property="FontWeight"   Value="Bold"/>
-            <Setter Property="Height"       Value="36"/>
+            <Setter Property="Height"       Value="28"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor"       Value="Hand"/>
             <Setter Property="Foreground"   Value="White"/>
@@ -66,9 +66,9 @@
         <Style x:Key="ExecuteButtonStyle" TargetType="Button">
             <Setter Property="Background"   Value="#E65100"/>
             <Setter Property="Foreground"   Value="White"/>
-            <Setter Property="FontSize"     Value="14"/>
+            <Setter Property="FontSize"     Value="12"/>
             <Setter Property="FontWeight"   Value="Bold"/>
-            <Setter Property="Height"       Value="42"/>
+            <Setter Property="Height"       Value="28"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor"       Value="Hand"/>
         </Style>
@@ -77,25 +77,25 @@
         <Style x:Key="SecondaryButtonStyle" TargetType="Button">
             <Setter Property="Background"   Value="#3D3D3D"/>
             <Setter Property="Foreground"   Value="White"/>
-            <Setter Property="FontSize"     Value="12"/>
+            <Setter Property="FontSize"     Value="11"/>
             <Setter Property="FontWeight"   Value="Bold"/>
-            <Setter Property="Height"       Value="28"/>
+            <Setter Property="Height"       Value="22"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor"       Value="Hand"/>
         </Style>
     </Window.Resources>
 
-    <StackPanel Margin="12">
+    <StackPanel Margin="10,18,10,10">
 
         <!-- Header -->
         <TextBlock Text="TRADE ASSISTANT"
-                   FontSize="11" FontWeight="Bold" Foreground="#888"
-                   Margin="0,0,0,10"/>
+                   FontSize="10" FontWeight="Bold" Foreground="#888"
+                   Margin="0,0,0,6"/>
 
         <!-- Direction toggle -->
         <Button Content="{Binding DirectionLabel}"
                 Command="{Binding ToggleDirectionCommand}"
-                Margin="0,0,0,10">
+                Margin="0,0,0,5">
             <Button.Style>
                 <Style TargetType="Button" BasedOn="{StaticResource DirectionButtonStyle}">
                     <Style.Triggers>
@@ -110,10 +110,10 @@
             </Button.Style>
         </Button>
 
-        <Separator Background="#333" Margin="0,0,0,10"/>
+        <Separator Background="#333" Margin="0,1,0,5"/>
 
         <!-- SL Points adjuster (▼/▲ buttons, ±5 points per click) -->
-        <Border Background="#2D2D2D" BorderBrush="#555" BorderThickness="1" CornerRadius="4" Margin="0,0,0,10" Padding="8">
+        <Border Background="#2D2D2D" BorderBrush="#555" BorderThickness="1" CornerRadius="3" Margin="0,0,0,3" Padding="5">
             <Grid HorizontalAlignment="Center">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -125,28 +125,39 @@
                         Content="▼"
                         Command="{Binding NudgeDownCommand}"
                         Style="{StaticResource SecondaryButtonStyle}"
-                        Width="16" Height="16" FontSize="9" FontWeight="Normal"
+                        Width="14" Height="14" FontSize="8" FontWeight="Normal"
                         Padding="0"
                         HorizontalContentAlignment="Center"
                         VerticalContentAlignment="Center"
-                        ToolTip="Tighter SL (-5 pts)"/>
+                        ToolTip="Tighter SL (−1 step)"/>
 
                 <Button Grid.Column="2"
                         Content="▲"
                         Command="{Binding NudgeUpCommand}"
                         Style="{StaticResource SecondaryButtonStyle}"
-                        Width="16" Height="16" FontSize="9" FontWeight="Normal"
+                        Width="14" Height="14" FontSize="8" FontWeight="Normal"
                         Padding="0"
                         HorizontalContentAlignment="Center"
                         VerticalContentAlignment="Center"
-                        ToolTip="Wider SL (+5 pts)"/>
+                        ToolTip="Wider SL (+1 step)"/>
             </Grid>
         </Border>
 
-        <!-- Risk inputs -->
-        <Grid Margin="0,0,0,6">
+        <!-- SL step (points) -->
+        <Grid Margin="0,0,0,3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="80"/>
+                <ColumnDefinition Width="84"/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="SL Step (pts)" Style="{StaticResource LabelStyle}"/>
+            <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
+                       Text="{Binding SlStepPoints, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0.##}}"/>
+        </Grid>
+
+        <!-- Risk inputs -->
+        <Grid Margin="0,0,0,3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="64"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
             <ComboBox Grid.Column="0" Style="{StaticResource ComboBoxStyle}"
@@ -156,9 +167,9 @@
                        Text="{Binding RiskValue, UpdateSourceTrigger=PropertyChanged}"/>
         </Grid>
 
-        <Grid Margin="0,0,0,10">
+        <Grid Margin="0,0,0,3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="84"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="R:R Ratio" Style="{StaticResource LabelStyle}"/>
@@ -166,9 +177,9 @@
                        Text="{Binding RrRatio, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F1}}"/>
         </Grid>
 
-        <Grid Margin="0,0,0,10">
+        <Grid Margin="0,0,0,3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="84"/>
                 <ColumnDefinition/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
@@ -176,25 +187,25 @@
             <TextBox   Grid.Column="1" Style="{StaticResource InputStyle}"
                        Text="{Binding BreakEvenRr, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F1}}"/>
             <CheckBox  Grid.Column="2" Content="Auto BE" Foreground="#AAAAAA"
-                       VerticalAlignment="Center" Margin="8,0,0,0"
+                       VerticalAlignment="Center" Margin="6,0,0,0"
                        IsChecked="{Binding AutoBreakEven, UpdateSourceTrigger=PropertyChanged}"/>
         </Grid>
 
-        <Separator Background="#333" Margin="0,0,0,10"/>
+        <Separator Background="#333" Margin="0,1,0,5"/>
 
         <!-- Live plan display -->
-        <Grid Margin="0,0,0,4">
+        <Grid Margin="0,0,0,2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="84"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Contracts"  Style="{StaticResource LabelStyle}"/>
-            <TextBlock Grid.Column="1" Text="{Binding Contracts}" Style="{StaticResource ValueStyle}" FontSize="22"/>
+            <TextBlock Grid.Column="1" Text="{Binding Contracts}" Style="{StaticResource ValueStyle}" FontSize="15"/>
         </Grid>
 
-        <Grid Margin="0,0,0,4">
+        <Grid Margin="0,0,0,2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="84"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Risk $"     Style="{StaticResource LabelStyle}"/>
@@ -202,9 +213,9 @@
                        Text="{Binding RiskDollars, StringFormat=${0:F0}}"/>
         </Grid>
 
-        <Grid Margin="0,0,0,4">
+        <Grid Margin="0,0,0,2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="84"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Profit $"   Style="{StaticResource LabelStyle}"/>
@@ -212,33 +223,34 @@
                        Text="{Binding ProfitDollars, StringFormat=${0:F0}}"/>
         </Grid>
 
-        <Separator Background="#333" Margin="0,6,0,10"/>
+        <Separator Background="#333" Margin="0,3,0,5"/>
 
         <!-- ARMED indicator -->
-        <Border Background="#F57F17" CornerRadius="4" Padding="8,4" Margin="0,0,0,8"
+        <Border Background="#F57F17" CornerRadius="3" Padding="6,2" Margin="0,0,0,5"
                 Visibility="{Binding IsArmed, Converter={StaticResource BoolToVis}}">
             <TextBlock Text="ARMED — Click Execute"
-                       FontWeight="Bold" Foreground="Black"
+                       FontSize="10" FontWeight="Bold" Foreground="Black"
                        HorizontalAlignment="Center"/>
         </Border>
 
         <!-- Status message -->
         <TextBlock Text="{Binding StatusMessage}"
-                   Foreground="#AAAAAA" FontSize="11"
+                   Foreground="#AAAAAA" FontSize="10"
                    TextWrapping="Wrap"
-                   Margin="0,0,0,10"/>
+                   Margin="0,0,0,5"/>
 
         <!-- Execute button -->
         <Button Content="EXECUTE"
                 Command="{Binding ExecuteCommand}"
                 Style="{StaticResource ExecuteButtonStyle}"
-                Margin="0,0,0,4"/>
+                Margin="0,0,0,2"/>
 
         <!-- Manual break-even -->
         <Button Content="BREAK-EVEN"
                 Command="{Binding BreakEvenCommand}"
                 Style="{StaticResource SecondaryButtonStyle}"
-                Margin="0,6,0,0"/>
+                Background="#FFD81A" Foreground="Black"
+                Margin="0,4,0,0"/>
 
     </StackPanel>
 </Window>
