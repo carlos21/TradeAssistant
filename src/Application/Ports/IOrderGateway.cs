@@ -23,6 +23,9 @@ namespace TradeAssistant.Application.Ports
         /// <summary>Moves the working stop order to a new price (e.g. break-even).</summary>
         void MoveStopTo(double newStopPrice);
 
+        /// <summary>Moves the working take-profit limit order to a new price (e.g. RR change).</summary>
+        void MoveTargetTo(double newTpPrice);
+
         /// <summary>Cancels all working orders for this trade.</summary>
         void CancelAll();
 

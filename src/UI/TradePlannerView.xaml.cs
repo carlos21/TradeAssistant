@@ -179,6 +179,7 @@ namespace TradeAssistant.UI
             // Risk value input (label changes based on RiskMode)
             root.Children.Add(MakeDynamicInputRow("RiskValueLabel", "RiskValue", "{0:F2}"));
             root.Children.Add(MakeInputRow("R:R Ratio",    "RrRatio",          "{0:F1}"));
+            root.Children.Add(MakeUpdateRrButton());
             root.Children.Add(MakeBreakEvenRow());
             root.Children.Add(MakeCheckboxRow("Show Boxes", "ShowTradeBoxes"));
             root.Children.Add(MakeSeparator());
@@ -303,6 +304,25 @@ namespace TradeAssistant.UI
             grid.Children.Add(tb);
 
             return grid;
+        }
+
+        private static UIElement MakeUpdateRrButton()
+        {
+            var btn = new Button
+            {
+                Content         = "UPDATE RR",
+                Background      = new SolidColorBrush(Color.FromRgb(0x00, 0x80, 0x80)),
+                Foreground      = Brushes.White,
+                FontSize        = 10,
+                FontWeight      = FontWeights.Bold,
+                Height          = 18,
+                Cursor          = System.Windows.Input.Cursors.Hand,
+                BorderThickness = new Thickness(0),
+                Margin          = new Thickness(0, 0, 0, 3),
+                ToolTip         = "Move the live TP order to the new R:R (active trades only)"
+            };
+            btn.SetBinding(Button.CommandProperty, new Binding("UpdateRrCommand"));
+            return btn;
         }
 
         private UIElement MakeBreakEvenRow()

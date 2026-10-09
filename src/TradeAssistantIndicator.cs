@@ -25,7 +25,8 @@ namespace NinjaTrader.NinjaScript.Indicators
     /// All trading logic lives in the layers — none here.
     ///
     /// Hotkeys: B = break-even. SL distance adjusts via drag or the ▲/▼ panel
-    /// buttons (±1 SL step).
+    /// buttons (±1 SL step). While a trade is Active the UPDATE RR button moves
+    /// the live TP order to the currently entered R:R ratio.
     /// </summary>
     public class TradeAssistantIndicator : Indicator
     {
@@ -183,6 +184,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             _controller.PlanUpdated      += OnPlanUpdated;
             _stateMachine.StateChanged   += OnStateChanged;
             _coordinator.BracketPlaced   += OnBracketPlaced;
+            _coordinator.BracketUpdated  += OnBracketUpdated;
 
             _statusHandler = msg =>
                 Dispatcher.InvokeAsync(() => { if (_viewModel != null) _viewModel.StatusMessage = msg; });
@@ -218,6 +220,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                     _viewModel.ExecuteRequested         = OnExecuteRequested;
                     _viewModel.ManualBreakEvenRequested = () => _breakEvenMonitor.MoveToBreakEven();
+                    _viewModel.UpdateRrRequested        = rr => _coordinator.UpdateRrRatio(rr);
                     _viewModel.ErrorDisplay             = ShowError;
                     _viewModel.ShowTradeBoxesChanged   += show => ForceRefresh();
 
@@ -616,6 +619,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                 _controller.Config.BreakEvenRr, bracket.Direction);
         }
 
+        private void OnBracketUpdated(BracketInfo bracket)
+        {
+            _tpPrice = bracket.TpPrice;
+            Dispatcher.InvokeAsync(() => ForceRefresh());
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         // Layer event handlers
         // ─────────────────────────────────────────────────────────────────────
@@ -730,7 +739,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (_coordinator != null)
                 {
-                    _coordinator.BracketPlaced -= OnBracketPlaced;
+                    _coordinator.BracketPlaced  -= OnBracketPlaced;
+                    _coordinator.BracketUpdated -= OnBracketUpdated;
                     if (_statusHandler != null) _coordinator.StatusMessage  -= _statusHandler;
                     if (_errorHandler  != null) _coordinator.ExecutionError -= _errorHandler;
                 }

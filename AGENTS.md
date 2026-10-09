@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents working with code in this repository.
 
 ## Project Overview
 
@@ -67,7 +67,7 @@ Min-risk rule     = if Contracts >= 1 and realized risk < $100 (TradeConfigurati
 ### Application Layer (`/src/Application`)
 Coordinates domain logic with UI and infrastructure. No direct NinjaTrader API calls.
 - `TradePlannerController` — owns inputs; SL distance snapped to the configured SL step; **TP always derived as SL distance × configured RR (RR never mutates)**; `NudgeStop(±1)` for the ▲▼ panel buttons; `SetSlStepPoints` re-snaps a placed stop; emits `PlanUpdated`
-- `BracketExecutionCoordinator` — market entry → on fill submits OCO bracket anchored to `AverageFillPrice`; drives the state machine
+- `BracketExecutionCoordinator` — market entry → on fill submits OCO bracket anchored to `AverageFillPrice`; drives the state machine; `UpdateRrRatio(newRr)` moves the live TP to fill ± **original** risk distance × new RR (valid in Active/BreakEvenTriggered; emits `BracketUpdated`)
 - `BreakEvenMonitor` — event-driven via `IPriceFeed` (never polls); auto-moves stop to entry at the configured RR multiple; manual `MoveToBreakEven()` for the B key / panel button
 - `ChartInteractionController` — testable drag state machine: X-bounds + Y-tolerance hit test, idempotent begin, unconditional end/cancel (fixes stuck-drag bug)
 - `Ports/` — `IInstrumentInfoProvider`, `IAccountDataProvider`, `IOrderGateway`, `IPriceFeed`, `IPriceAxisConverter`
@@ -104,6 +104,8 @@ Thin composition root: wires layers, translates chart mouse/keyboard events into
 5. Activate `BreakEvenMonitor` with the actual fill price
 
 **Break-even:** Auto when price crosses fill ± distance × BreakEvenRr (event-driven, once), or manual via **B** key / panel button — moves the live stop order to the fill price via `Account.Change`.
+
+**Mid-trade RR update:** Editing the R:R field + clicking the panel's UPDATE RR button (enabled in Active/BreakEvenTriggered) moves the live TP limit order via `Account.Change` to fill ± original risk distance × new RR — the original distance is kept even after break-even, so the update never collapses to the entry price.
 
 ## Trade State Machine
 

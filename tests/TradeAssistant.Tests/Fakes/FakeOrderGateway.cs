@@ -13,11 +13,13 @@ namespace TradeAssistant.Tests.Fakes
         public List<EntryCall> Entries { get; } = new();
         public List<BracketCall> Brackets { get; } = new();
         public List<double> StopMoves { get; } = new();
+        public List<double> TargetMoves { get; } = new();
         public int CancelAllCount { get; private set; }
 
         public bool ThrowOnSubmitMarketEntry { get; set; }
         public bool ThrowOnSubmitBracket { get; set; }
         public bool ThrowOnMoveStopTo { get; set; }
+        public bool ThrowOnMoveTargetTo { get; set; }
 
         public void SubmitMarketEntry(TradeDirection direction, int quantity)
         {
@@ -35,6 +37,12 @@ namespace TradeAssistant.Tests.Fakes
         {
             if (ThrowOnMoveStopTo) throw new InvalidOperationException("move boom");
             StopMoves.Add(newStopPrice);
+        }
+
+        public void MoveTargetTo(double newTpPrice)
+        {
+            if (ThrowOnMoveTargetTo) throw new InvalidOperationException("target boom");
+            TargetMoves.Add(newTpPrice);
         }
 
         public void CancelAll() => CancelAllCount++;

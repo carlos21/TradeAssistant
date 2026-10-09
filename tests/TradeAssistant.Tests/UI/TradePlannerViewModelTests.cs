@@ -413,6 +413,91 @@ namespace TradeAssistant.Tests.UI
             Assert.Empty(errors);                          // no popup on success
         }
 
+        // ── Update RR command ───────────────────────────────────────────────
+
+        [Fact]
+        public void UpdateRrCommand_gated_on_CanUpdateRr_and_forwards_current_rr()
+        {
+            double? received = null;
+            _vm.UpdateRrRequested = rr => { received = rr; return RrUpdateResult.Updated; };
+
+            Assert.False(_vm.UpdateRrCommand.CanExecute(null)); // Idle
+
+            SetupValidPlan();
+            Assert.False(_vm.UpdateRrCommand.CanExecute(null)); // Planning
+
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            Assert.False(_vm.UpdateRrCommand.CanExecute(null));
+
+            _sm.TransitionTo(TradeState.Active);
+            Assert.True(_vm.UpdateRrCommand.CanExecute(null));
+
+            _vm.RrRatio = 5.5;
+            _vm.UpdateRrCommand.Execute(null);
+            Assert.Equal(5.5, received);
+
+            _sm.TransitionTo(TradeState.BreakEvenTriggered);
+            Assert.True(_vm.UpdateRrCommand.CanExecute(null));
+
+            _sm.TransitionTo(TradeState.Closed);
+            Assert.False(_vm.UpdateRrCommand.CanExecute(null));
+        }
+
+        [Theory]
+        [InlineData(RrUpdateResult.InvalidRatio,    "RR ratio must be positive")]
+        [InlineData(RrUpdateResult.NoActiveTrade,   "No active trade to update")]
+        [InlineData(RrUpdateResult.NoWorkingTarget, "Target order not working — retry in a moment")]
+        public void UpdateRrCommand_surfaces_rejection_reasons_in_status_and_popup(
+            RrUpdateResult result, string expectedMessage)
+        {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+            _vm.UpdateRrRequested = _ => result;
+            SetupValidPlan();
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            _sm.TransitionTo(TradeState.Active);
+
+            _vm.UpdateRrCommand.Execute(null);
+            Assert.Equal(expectedMessage, _vm.StatusMessage);
+            Assert.Equal(expectedMessage, TradePlannerViewModel.DescribeRrUpdateResult(result));
+            Assert.Equal(("RR Update Unavailable", expectedMessage), Assert.Single(errors));
+        }
+
+        [Fact]
+        public void UpdateRrCommand_Updated_leaves_status_to_the_coordinator()
+        {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+            _vm.UpdateRrRequested = _ => RrUpdateResult.Updated;
+            SetupValidPlan();
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            _sm.TransitionTo(TradeState.Active);
+            string statusBefore = _vm.StatusMessage;
+
+            _vm.UpdateRrCommand.Execute(null);
+            Assert.Equal(statusBefore, _vm.StatusMessage); // no rejection message injected
+            Assert.Empty(errors);                          // no popup on success
+        }
+
+        [Fact]
+        public void UpdateRrCommand_catches_handler_exceptions_into_status_and_popup()
+        {
+            var errors = new List<(string Title, string Message)>();
+            _vm.ErrorDisplay = (t, m) => errors.Add((t, m));
+            _vm.UpdateRrRequested = _ => throw new InvalidOperationException("nope");
+            SetupValidPlan();
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            _sm.TransitionTo(TradeState.Active);
+
+            _vm.UpdateRrCommand.Execute(null);
+            Assert.Equal("RR update error: nope", _vm.StatusMessage);
+            Assert.Equal(("RR Update Error", "nope"), Assert.Single(errors));
+        }
+
         // ── Auto BE checkbox ────────────────────────────────────────────────
 
         [Fact]

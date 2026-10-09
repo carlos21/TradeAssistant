@@ -17,6 +17,7 @@ namespace TradeAssistant.Tests.Application
         private readonly List<string> _errors = new();
         private readonly List<string> _status = new();
         private readonly List<BracketInfo> _brackets = new();
+        private readonly List<BracketInfo> _bracketUpdates = new();
 
         public BracketExecutionCoordinatorTests()
         {
@@ -24,6 +25,7 @@ namespace TradeAssistant.Tests.Application
             _sut.ExecutionError += e => _errors.Add(e);
             _sut.StatusMessage += s => _status.Add(s);
             _sut.BracketPlaced += b => _brackets.Add(b);
+            _sut.BracketUpdated += b => _bracketUpdates.Add(b);
         }
 
         private static TradePlan LongPlan(int contracts = 2, double rr = 4.0, double slDist = 20) =>
@@ -254,6 +256,131 @@ namespace TradeAssistant.Tests.Application
 
             Assert.Equal(TradeState.Idle, _sm.Current);
             Assert.Contains(_status, s => s == "Position closed. Ready for next trade.");
+        }
+
+        // ── Mid-trade RR updates ────────────────────────────────────────────
+
+        private void ToActiveLong(double fillPrice = 20000)
+        {
+            ToPlanning();
+            _sut.Execute(LongPlan());
+            _gateway.FireEntryFilled(fillPrice);
+        }
+
+        [Fact]
+        public void UpdateRrRatio_moves_tp_to_fill_plus_original_risk_times_new_rr_long()
+        {
+            ToActiveLong(20000); // bracket: SL 19980, distance 20
+
+            var result = _sut.UpdateRrRatio(6.0);
+
+            Assert.Equal(RrUpdateResult.Updated, result);
+            Assert.Equal(20120, Assert.Single(_gateway.TargetMoves)); // 20000 + 20 × 6
+            var update = Assert.Single(_bracketUpdates);
+            Assert.Equal(20000, update.FillPrice);
+            Assert.Equal(19980, update.StopPrice);   // stop untouched
+            Assert.Equal(20120, update.TpPrice);
+            Assert.Equal(TradeDirection.Long, update.Direction);
+            Assert.Contains(_status, s => s.Contains("Target moved to 20120.00"));
+            Assert.Equal(TradeState.Active, _sm.Current); // no state transition
+        }
+
+        [Fact]
+        public void UpdateRrRatio_moves_tp_below_fill_for_short()
+        {
+            ToPlanning();
+            _sut.Execute(TradePlan.Valid(1, 400, 1600, 20000, 20020, 19920,
+                20, 4.0, TradeDirection.Short, 80));
+            _gateway.FireEntryFilled(19998.75); // bracket: SL 20018.75, distance 20
+
+            var result = _sut.UpdateRrRatio(2.0);
+
+            Assert.Equal(RrUpdateResult.Updated, result);
+            Assert.Equal(19958.75, Assert.Single(_gateway.TargetMoves)); // 19998.75 − 20 × 2
+            Assert.Equal(19958.75, Assert.Single(_bracketUpdates).TpPrice);
+        }
+
+        [Fact]
+        public void UpdateRrRatio_snaps_target_to_tick()
+        {
+            ToActiveLong(20000); // distance 20
+
+            var result = _sut.UpdateRrRatio(1.51); // 20000 + 30.2 → snaps to 20030.25
+
+            Assert.Equal(RrUpdateResult.Updated, result);
+            Assert.Equal(20030.25, Assert.Single(_gateway.TargetMoves));
+        }
+
+        [Fact]
+        public void UpdateRrRatio_works_after_break_even_using_original_distance()
+        {
+            ToActiveLong(20000);
+            _sm.TransitionTo(TradeState.BreakEvenTriggered); // stop is now at entry
+
+            var result = _sut.UpdateRrRatio(2.0);
+
+            Assert.Equal(RrUpdateResult.Updated, result);
+            // Still the ORIGINAL 20-pt risk distance, not the BE stop at the fill.
+            Assert.Equal(20040, Assert.Single(_gateway.TargetMoves));
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1.5)]
+        public void UpdateRrRatio_rejects_non_positive_rr(double rr)
+        {
+            ToActiveLong();
+
+            Assert.Equal(RrUpdateResult.InvalidRatio, _sut.UpdateRrRatio(rr));
+            Assert.Empty(_gateway.TargetMoves);
+        }
+
+        [Fact]
+        public void UpdateRrRatio_rejects_when_not_active()
+        {
+            ToPlanning(); // Planning
+            Assert.Equal(RrUpdateResult.NoActiveTrade, _sut.UpdateRrRatio(2.0));
+
+            _sut.Execute(LongPlan()); // Submitted — entry not yet filled
+            Assert.Equal(RrUpdateResult.NoActiveTrade, _sut.UpdateRrRatio(2.0));
+
+            Assert.Empty(_gateway.TargetMoves);
+        }
+
+        [Fact]
+        public void UpdateRrRatio_rejects_when_no_bracket_placed()
+        {
+            // Reach Active without any fill/bracket (state machine driven directly).
+            ToPlanning();
+            _sm.TransitionTo(TradeState.Armed);
+            _sm.TransitionTo(TradeState.Submitted);
+            _sm.TransitionTo(TradeState.Active);
+
+            Assert.Equal(RrUpdateResult.NoWorkingTarget, _sut.UpdateRrRatio(2.0));
+            Assert.Empty(_gateway.TargetMoves);
+        }
+
+        [Fact]
+        public void UpdateRrRatio_gateway_throw_reports_error()
+        {
+            ToActiveLong();
+            _gateway.ThrowOnMoveTargetTo = true;
+
+            var result = _sut.UpdateRrRatio(2.0);
+
+            Assert.Equal(RrUpdateResult.NoWorkingTarget, result);
+            Assert.Equal("Target update failed: target boom", Assert.Single(_errors));
+            Assert.Empty(_bracketUpdates);
+        }
+
+        [Fact]
+        public void UpdateRrRatio_rejected_after_position_closed()
+        {
+            ToActiveLong();
+            _gateway.FirePositionClosed();
+
+            Assert.Equal(RrUpdateResult.NoActiveTrade, _sut.UpdateRrRatio(2.0));
+            Assert.Empty(_gateway.TargetMoves);
         }
 
         // ── Gateway replacement / disposal ──────────────────────────────────

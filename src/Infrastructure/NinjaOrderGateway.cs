@@ -130,6 +130,15 @@ namespace TradeAssistant.Infrastructure
             _account.Change(new[] { _stopOrder });
         }
 
+        public void MoveTargetTo(double newTpPrice)
+        {
+            if (_tpOrder == null || !IsWorking(_tpOrder))
+                throw new InvalidOperationException("No working target order to move.");
+
+            _tpOrder.LimitPrice = newTpPrice;
+            _account.Change(new[] { _tpOrder });
+        }
+
         public void CancelAll()
         {
             TryCancel(_entryOrder);

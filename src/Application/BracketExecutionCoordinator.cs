@@ -4,6 +4,19 @@ using TradeAssistant.Domain;
 
 namespace TradeAssistant.Application
 {
+    /// <summary>Outcome of a mid-trade RR update attempt, so callers can explain rejections.</summary>
+    public enum RrUpdateResult
+    {
+        /// <summary>The take-profit order was moved.</summary>
+        Updated,
+        /// <summary>No live trade — the state machine is not Active or BreakEvenTriggered.</summary>
+        NoActiveTrade,
+        /// <summary>The requested RR ratio is not positive.</summary>
+        InvalidRatio,
+        /// <summary>No bracket placed yet or the target order move failed.</summary>
+        NoWorkingTarget
+    }
+
     /// <summary>
     /// Executes a TradePlan as a native bracket order set — no ATM strategies:
     ///  1. Submit a market entry order.
@@ -17,12 +30,16 @@ namespace TradeAssistant.Application
         private readonly TradeStateMachine     _stateMachine;
         private readonly IInstrumentInfoProvider _instrument;
 
-        private TradePlan _pendingPlan;
-        private bool      _bracketSubmitted;
+        private TradePlan   _pendingPlan;
+        private BracketInfo _liveBracket;
+        private bool        _bracketSubmitted;
 
         public event Action<string>      ExecutionError;
         public event Action<string>      StatusMessage;
         public event Action<BracketInfo> BracketPlaced;
+
+        /// <summary>Fires when the live bracket's target was moved (RR update).</summary>
+        public event Action<BracketInfo> BracketUpdated;
 
         public BracketExecutionCoordinator(
             IOrderGateway            gateway,
@@ -87,6 +104,55 @@ namespace TradeAssistant.Application
             Subscribe(_gateway);
         }
 
+        // ── Mid-trade adjustments ───────────────────────────────────────────
+
+        /// <summary>
+        /// Moves the live TP order to reflect a new RR ratio. The target is
+        /// recomputed from the ACTUAL fill price and the ORIGINAL risk distance
+        /// (fill → stop at bracket placement), so the update stays meaningful
+        /// even after the stop was moved to break-even. No state transition.
+        /// </summary>
+        public RrUpdateResult UpdateRrRatio(double newRr)
+        {
+            if (newRr <= 0) return RrUpdateResult.InvalidRatio;
+
+            TradeState state = _stateMachine.Current;
+            if (state != TradeState.Active && state != TradeState.BreakEvenTriggered)
+                return RrUpdateResult.NoActiveTrade;
+
+            if (_liveBracket == null) return RrUpdateResult.NoWorkingTarget;
+
+            double fillPrice = _liveBracket.FillPrice;
+            double riskDistance = Math.Abs(fillPrice - _liveBracket.StopPrice);
+
+            IDirectionStrategy strategy = _liveBracket.Direction == TradeDirection.Long
+                ? (IDirectionStrategy)LongStrategy.Instance
+                : ShortStrategy.Instance;
+
+            double stopProxy = _liveBracket.Direction == TradeDirection.Long
+                ? fillPrice - riskDistance
+                : fillPrice + riskDistance;
+            double newTp = StopSnapper.SnapToTick(
+                strategy.CalcTp(fillPrice, stopProxy, newRr), _instrument.TickSize);
+
+            try
+            {
+                _gateway.MoveTargetTo(newTp);
+            }
+            catch (Exception ex)
+            {
+                ExecutionError?.Invoke($"Target update failed: {ex.Message}");
+                return RrUpdateResult.NoWorkingTarget;
+            }
+
+            _liveBracket = new BracketInfo(
+                fillPrice, _liveBracket.StopPrice, newTp,
+                _liveBracket.Contracts, _liveBracket.Direction);
+            StatusMessage?.Invoke($"Target moved to {newTp:F2} (RR {newRr:F1}).");
+            BracketUpdated?.Invoke(_liveBracket);
+            return RrUpdateResult.Updated;
+        }
+
         // ── Gateway events ──────────────────────────────────────────────────
 
         private void OnEntryFilled(double fillPrice)
@@ -114,8 +180,9 @@ namespace TradeAssistant.Application
                 _stateMachine.TryTransitionTo(TradeState.Active);
                 StatusMessage?.Invoke(
                     $"Filled at {fillPrice:F2}. Bracket live — SL {slPrice:F2} / TP {tpPrice:F2}.");
-                BracketPlaced?.Invoke(new BracketInfo(
-                    fillPrice, slPrice, tpPrice, plan.Contracts, plan.Direction));
+                _liveBracket = new BracketInfo(
+                    fillPrice, slPrice, tpPrice, plan.Contracts, plan.Direction);
+                BracketPlaced?.Invoke(_liveBracket);
             }
             catch (Exception ex)
             {
@@ -125,8 +192,9 @@ namespace TradeAssistant.Application
                 // activated with the real fill price (manual BE must work for
                 // the open position even without working SL/TP orders).
                 _stateMachine.TryTransitionTo(TradeState.Active);
-                BracketPlaced?.Invoke(new BracketInfo(
-                    fillPrice, slPrice, tpPrice, plan.Contracts, plan.Direction));
+                _liveBracket = new BracketInfo(
+                    fillPrice, slPrice, tpPrice, plan.Contracts, plan.Direction);
+                BracketPlaced?.Invoke(_liveBracket);
                 ExecutionError?.Invoke(
                     $"Bracket submission failed: {ex.Message}. " +
                     "Position is OPEN WITHOUT SL/TP — flatten it manually.");
@@ -137,6 +205,7 @@ namespace TradeAssistant.Application
         {
             ExecutionError?.Invoke($"Order rejected: {reason}");
             _pendingPlan      = null;
+            _liveBracket      = null;
             _bracketSubmitted = false;
             _stateMachine.TryTransitionTo(TradeState.Cancelled);
             _stateMachine.TryTransitionTo(TradeState.Idle);
@@ -150,6 +219,7 @@ namespace TradeAssistant.Application
             {
                 StatusMessage?.Invoke($"Entry cancelled: {reason}");
                 _pendingPlan      = null;
+                _liveBracket      = null;
                 _bracketSubmitted = false;
                 _stateMachine.TryTransitionTo(TradeState.Cancelled);
                 _stateMachine.TryTransitionTo(TradeState.Idle);
@@ -166,6 +236,7 @@ namespace TradeAssistant.Application
                 _stateMachine.TryTransitionTo(TradeState.Idle);
 
             _pendingPlan      = null;
+            _liveBracket      = null;
             _bracketSubmitted = false;
             StatusMessage?.Invoke("Position closed. Ready for next trade.");
         }

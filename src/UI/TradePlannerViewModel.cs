@@ -20,6 +20,9 @@ namespace TradeAssistant.UI
         public Action ExecuteRequested { get; set; }
         public Func<BreakEvenResult> ManualBreakEvenRequested { get; set; }
 
+        /// <summary>Wired by the indicator; applies a new RR to the live trade's TP order.</summary>
+        public Func<double, RrUpdateResult> UpdateRrRequested { get; set; }
+
         /// <summary>Wired by the indicator to a MessageBox popup; receives (title, message).</summary>
         public Action<string, string> ErrorDisplay { get; set; }
 
@@ -111,6 +114,18 @@ namespace TradeAssistant.UI
                 case BreakEvenResult.NoActiveTrade:      return "No active trade to move";
                 case BreakEvenResult.NoWorkingStop:      return "Stop order not yet working — retry in a moment";
                 default:                                 return null; // Moved — the monitor reports success itself
+            }
+        }
+
+        /// <summary>Human-readable feedback for a rejected RR update attempt.</summary>
+        public static string DescribeRrUpdateResult(RrUpdateResult result)
+        {
+            switch (result)
+            {
+                case RrUpdateResult.InvalidRatio:     return "RR ratio must be positive";
+                case RrUpdateResult.NoActiveTrade:    return "No active trade to update";
+                case RrUpdateResult.NoWorkingTarget:  return "Target order not working — retry in a moment";
+                default:                              return null; // Updated — the coordinator reports success itself
             }
         }
 
@@ -248,6 +263,17 @@ namespace TradeAssistant.UI
             }
         }
 
+        private bool _canUpdateRr;
+        public bool CanUpdateRr
+        {
+            get => _canUpdateRr;
+            set
+            {
+                SetProperty(ref _canUpdateRr, value);
+                (_updateRrCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+
         // ── Commands ─────────────────────────────────────────────────────────
 
         private readonly ICommand _executeCommand;
@@ -264,6 +290,9 @@ namespace TradeAssistant.UI
 
         private readonly ICommand _breakEvenCommand;
         public ICommand BreakEvenCommand => _breakEvenCommand;
+
+        private readonly ICommand _updateRrCommand;
+        public ICommand UpdateRrCommand => _updateRrCommand;
 
         // ── Constructor ──────────────────────────────────────────────────────
 
@@ -326,6 +355,27 @@ namespace TradeAssistant.UI
                 },
                 () => CanBreakEven);
 
+            _updateRrCommand = new RelayCommand(
+                () =>
+                {
+                    try
+                    {
+                        RrUpdateResult result = UpdateRrRequested?.Invoke(RrRatio) ?? RrUpdateResult.NoWorkingTarget;
+                        string feedback = DescribeRrUpdateResult(result);
+                        if (feedback != null)
+                        {
+                            StatusMessage = feedback;
+                            ErrorDisplay?.Invoke("RR Update Unavailable", feedback);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"RR update error: {ex.Message}";
+                        ErrorDisplay?.Invoke("RR Update Error", ex.Message);
+                    }
+                },
+                () => CanUpdateRr);
+
             _controller.PlanUpdated    += OnPlanUpdated;
             _stateMachine.StateChanged += OnStateChanged;
         }
@@ -383,6 +433,7 @@ namespace TradeAssistant.UI
             {
                 IsArmed      = next == TradeState.Armed;
                 CanBreakEven = next == TradeState.Active;
+                CanUpdateRr  = next == TradeState.Active || next == TradeState.BreakEvenTriggered;
                 (_executeCommand   as RelayCommand)?.RaiseCanExecuteChanged();
                 (_nudgeUpCommand   as RelayCommand)?.RaiseCanExecuteChanged();
                 (_nudgeDownCommand as RelayCommand)?.RaiseCanExecuteChanged();
